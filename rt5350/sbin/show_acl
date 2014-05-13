@@ -1,0 +1,23 @@
+#!/bin/sh
+
+# Show ACL list
+
+source /sbin/conf
+
+die(){
+    echo "Error: $@"
+    exit 1
+}
+
+p="$(__nvram_get AccessPolicy)"
+
+case "$p" in
+		1) echo "ACL mode: white list";;
+		2) echo "ACL mode: black list";;
+		0) echo "ACL disabled.";;
+esac
+echo "List: "
+LIST="$(__nvram_get ACL_LIST | sed -e 's/\;/ /g')"
+for i in $LIST; do
+    printf "%-18s\n" "$i"
+done

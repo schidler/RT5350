@@ -1,0 +1,8 @@
+#!/bin/sh
+
+source /sbin/vars
+
+[ "xSTA" == "x$(nvram_get 2860 WORK_MODE)" ] || iwpriv $WIFI_IFACE set SiteSurvey=1
+
+iwpriv $WIFI_IFACE  get_site_survey | awk -F '#' \
+	'!/get_site_survey\:|Siganl\(\%\)W-Mode|^$/{print "SSID: " $1 ", BSSID: " $2 ", Channel: " $3 ", Signal " $4 ", Mode: " $5 ", Security: " $6}'

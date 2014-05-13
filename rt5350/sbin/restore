@@ -1,0 +1,29 @@
+#!/bin/sh
+
+
+read_val(){
+	echo -en "$@"
+	read VAL
+	[ "x" == "x$VAL" ] && read_val "$@";
+}
+
+
+correct_it(){
+	read_val "$1"
+	case "$VAL" in
+		yes|YES|Yes|y|Y) $3 ;;
+		no|n|No|NO|N)    echo; $2 ;;
+		*) echo "Please, enter Y or N."; correct_it "$1" "$2" "$3";;
+	esac
+}
+
+restore_all(){
+    echo -ne "\nErasing NVRAM ...\n\n"
+    ralink_init clear 2860
+    sleep 1;
+    ralink_init renew 2860 /etc_ro/Wireless/RT2860AP/RT2860_default_vlan
+    echo "Done"
+}
+
+echo;
+correct_it "Restore router settings to default ? (y/n) " exit restore_all

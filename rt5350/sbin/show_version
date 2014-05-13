@@ -1,0 +1,5 @@
+#!/bin/sh
+
+source /sbin/version
+
+echo "Current firmware build at $FIRM_DATE"

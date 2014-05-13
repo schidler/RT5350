@@ -1,0 +1,11 @@
+#!/bin/sh
+
+sleep 15m;
+
+switch reg w 0x00a4 0x9 # port 0
+switch reg w 0x00a8 0x9 # port 1
+switch reg w 0x00ac 0x9 # port 2
+switch reg w 0x00b0 0x9 # port 3
+switch reg w 0x00b4 0x9 # port 4
+
+gpio l 11 4000 0 1 0 4000]

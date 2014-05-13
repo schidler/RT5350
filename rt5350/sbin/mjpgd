@@ -1,0 +1,45 @@
+#!/bin/sh
+
+# mjpg_streamer wrapper
+# Version 0.0.1
+
+source /sbin/conf
+source /sbin/vars
+
+die(){
+	__log_krn "$0: $@"
+	__log_stderr "$0: $@"
+	exit 1;
+}
+
+log(){
+	__log_stderr "$0: $@"
+	__log_krn "$0: $@";
+}
+
+[ -e "$DEFAULT_MJPG_DEVICE" ] || die "device $DEFAULT_MJPG_DEVICE not found!"
+mjpg_streamer --help 2>/dev/null || die "mjpg_streamer not found in PATH!"
+
+res="$(__nvram_get MJPG_RSN)" # resolution
+fps="$(__nvram_get MJPG_FPS)"
+port="$(__nvram_get MJPG_PORT)"
+
+[ "x" == "x$res"  ] && res="$DEFAULT_MJPG_RSN"
+[ "x" == "x$fps"  ] && fps="$DEFAULT_MJPG_FPS"
+[ "x" == "x$port" ] && port="$DEFAULT_MJPG_PORT"
+
+log "starting MJPG streaming on port $port, fps: $fps, resolution: $res."
+
+mjpg_streamer --input "input_uvc.so --device $DEFAULT_MJPG_DEVICE --fps $fps --resolution $res" -b
+#	--output "output_http.so -p $port" \
+sleep 1;
+if [ "x" == "x$(ps T | grep mjpg_streamer | grep -v grep)" ]; then
+	die "failed to start mjpg_streamer on $DEFAULT_MJPG_DEVICE!"
+else
+	__event "MJPG: started: port $port, fps: $fps, resolution: $res"
+	renice -20 $(ps | grep mjpg_streamer | grep -v grep | awk '{print ($1)}')
+	__event "Setting -20 priority to MJPG-STREAMER"
+	log "server started."
+fi
+
+exit 0;

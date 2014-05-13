@@ -1,0 +1,142 @@
+#!/bin/sh
+
+[ -e "./conf" ] && source ./conf
+[ -e "/sbin/conf" ] && source /sbin/conf
+
+usage(){
+	cat << EOF
+Usage: $(basename $0) ( $BRIDGE_IFACE | $WIFI_IFACE ) type  [ command ... ]
+
+    Type:
+        set -- set new value for param
+        get -- get the current value of param
+        
+    Global commands:
+        dns_pr  -- primary dns server (Example: ${DEFAULT_DNS_1})
+        dns_sec -- secondary dns server (Example: ${DEFAULT_DNS_2})
+        ntp     -- main NTP server (Example: ${DEFAULT_NTP})
+        hname   -- our hostname (Example: $DHCPD_DOMAIN or 0 for auto choice)
+        nat     -- network address translation ($BRIDGE_IFACE <=> $WIFI_IFACE)
+        max_con -- max connections for netfilter.ip_conntrack_max
+        
+    Commands for $BRIDGE_IFACE:
+        gateway -- default route (Example: $(____get_gateway_addr))
+        netmask -- default netmask (Example: $(____get_netmask_addr $BRIDGE_IFACE))
+        ip      -- default ip address (Example: $(____get_ip_addr $BRIDGE_IFACE))
+        mac     -- default mac address (Example: $(__get_mac_addr $BRIDGE_IFACE) or 0 for auto choice)
+        dhcp    -- get all settigns from dhcp server (1 or 0)
+        stp     -- enable or disable spanning tree protocol support (1 or 0)
+	
+    Commands for $WIFI_IFACE:
+        ssid    -- default ssid (Example: $(__get_ssid) or 0 for auto choice)
+        channel -- default channel (Example: $(__nvram_get Channel))
+        ip      -- default ip address (Example: $DHCPD_GATEWAY)
+        dhcp_rb -- ip address range begin for $DHCPD (Example: $DHCPD_RANGE_BEGIN)
+        dhcp_re -- ip address range end for $DHCPD (Example: $DHCPD_RANGE_END)
+        dhcp_dm -- domain name for $DHCPD (Example: $DHCPD_DOMAIN)
+        dhcp_tm -- lease time for $DHCPD (Example: $DHCPD_LEASE_TIME)
+        mode    -- default wireless mode
+            Values:
+                0: legacy 11b/g mixed
+                1: legacy 11B only
+                2: legacy 11A only
+                3: legacy 11a/b/g mixed
+                4: legacy 11G only
+                5: 11ABGN mixed
+                6: 11N only
+                7: 11GN mixed
+                8: 11AN mixed
+                9: 11BGN mixed
+                10: 11AGN mixed
+        bandwidth -- default bandwidth
+            Values:
+                0: 20Hz
+                1: 40Hz
+        bgprot  -- 11B/11G Protection
+            Values:
+                0: Auto 
+                1: Always on
+                2: Always off
+        txprmb  -- default TxPreamble
+            Values:
+                0: Preamble Long
+                1: Preamble Short
+                2: Auto
+	power   -- default transmit power
+            Values:
+                1: Min
+	      100: Max
+        
+For other commands and params, see iwpriv_usage.txt, or 'nvram_dump'.
+EOF
+}
+
+usage_usb_sta(){ # ToDo
+	__run_s grep $USB_IFACE /proc/net/dev || return
+	cat << EOF
+    Commands for $USB_IFACE
+        a_mode  -- auth mode (Example: OPEN)
+        a_enc   -- encrypt type (Example: NONE)
+        ssid    -- ssid for connecting
+        dhcp    -- run dhcp client
+EOF
+}
+
+parse_iface(){
+	case $1 in
+		$WIFI_IFACE)   export IFACE=$WIFI_IFACE;;
+		$BRIDGE_IFACE) export IFACE=$BRIDGE_IFACE;;
+		*) usage; [ "$1x" == "x" ] && __exit "Error: need interface!" || __exit "Error: interface '$1' not found!";;
+	esac
+}
+
+dump_it(){
+	case $IFACE in
+		$WIFI_IFACE)   __dump_for_wifi;;
+		$BRIDGE_IFACE) __dump_for_bridge;;
+		*) __exit "Error: interface '$IFACE' not found!";;
+	esac
+}
+
+set_val(){
+	case $IFACE in
+		$BRIDGE_IFACE)____set_val_bridge $1 $2;;
+		$WIFI_IFACE)  ____set_val_wifi   $1 $2;;
+	esac
+}
+
+show_val(){
+	case $IFACE in
+		$BRIDGE_IFACE) ____get_val_bridge $1;;
+		$WIFI_IFACE)   ____get_val_wifi   $1;;
+	esac
+}
+
+
+if [ $# -eq 2 ]; then # dump
+	parse_iface $1
+	case $2 in
+		dump|Dump|DUMP) dump_it;;
+		set|Set|SET) usage; __exit "Error: type '$2' required two values!";;
+		get|Get|GET) usage; [ "x$2" == "x" ] && __exit "Error: type '$2' need value!" || __exit "Error: type '$2' required value!";;
+		*) usage; [ "x$2" == "x" ] && __exit "Error: need type!" || __exit "Error: type '$2' not defined!";;
+	esac
+
+elif [ $# -eq 3 ]; then # get
+	parse_iface $1
+	case $2 in
+		get|Get|GET) [ "x$3" == "x" ] && usage && __exit "Error: type '$2'required value!"; show_val $3;;
+		set|Set|SET) usage; __exit "Error: type '$2' required two values!";;
+		dump|Dump|DUMP) dump_it;;
+		*) usage; [ "x$2" == "x" ] && __exit "Error: type '$2' need value!" || __exit "Error: values '$3' in type '$2' not found.";;
+	esac
+elif [ $# -eq 4 ]; then # set
+	parse_iface $1
+	case $2 in
+		dump|Dump|DUMP) dump_it;;
+		get|Get|GET) [ "x$3" == "x" ] && usage && __exit "Error: type '$2'required value!"; show_val $3;;
+		set|Set|SET) [ "x" == "x$3" -o "x" == "x$4" ] && usage && __exit "Error: type '$2' required two values!"; set_val $3 $4;;
+	esac;
+else
+	usage && __exit "Error: need interface, type, and command.";
+fi

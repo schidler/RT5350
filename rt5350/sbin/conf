@@ -1,0 +1,1693 @@
+#!/bin/sh
+#
+#
+#  userx [at] lavabit [dot] com (c)
+#          2012 - 2013 
+#              
+#
+#  Redistribution and use in source and binary forms, with or without
+#  modification, are permitted provided that the following conditions are
+#  met:
+#  
+#  * Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#  * Redistributions in binary form must reproduce the above
+#    copyright notice, this list of conditions and the following disclaimer
+#    in the documentation and/or other materials provided with the
+#    distribution.
+#  * Neither the name of the  nor the names of its
+#    contributors may be used to endorse or promote products derived from
+#    this software without specific prior written permission.
+#  
+#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+#  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+#  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+#  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+#  OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+#  LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+#  DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+#  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+#  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+#  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#  
+
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+export SOTONA_ONLINE=1
+source /sbin/vars
+
+__gen_mac_addr(){
+	printf "%02x:%02x:" $VENDOR_F_BYTE $VENDOR_S_BYTE
+	for i in 1 2 3 4; do
+		printf "%02x" $(($RANDOM % 255))
+		[ $i -ne 4 ] && echo -ne ':'
+	done
+	echo
+}
+
+__timestamp(){
+	date +"[%k:%M:%S]"
+}
+
+____log(){
+	[ "x1" == "x$BOOT_NOW" ] && from="Init" || from="System"
+	echo "${from}: $(__timestamp) $@"
+}
+
+__log_stderr(){
+	____log "$@" >&2
+}
+
+__log_krn(){
+	____log "$@" > /dev/kmsg
+}
+
+__log(){
+	[ "x1" == "x$BOOT_NOW" ] && __log_krn "$@" || __log_stderr "$@"
+}
+
+__run_s(){
+	$@ > /dev/null 2>&1
+	__check_error_not_die $? "Error in '$@', code $? !"
+}
+
+__exit(){
+	[ "x1" == "x$BOOT_NOW" ] && __log $@;
+	__log_stderr "$@"
+	exit 1;
+}
+
+__nvram_set(){
+	__log_krn "Writing key '$1' with value '$2' to nvram ..."
+	nvram_set 2860 "$1" "$2"
+}
+
+__nvram_get(){
+	nvram_get 2860 "$1"
+}
+
+__check_error(){
+	[ $1 -eq 0 ] && return;
+	#if [ "x$IGNORE_ERR" == "x0" -o "x" == "x$(__nvram_get INIT_IGNORE_ERR)" ]; then
+	#	__exit $2
+	#else
+		__log "Critical: $2"
+	#fi
+}
+
+__check_error_not_die(){
+	[ $1 -ne 0 ] && __log $2
+}
+
+__check_error_and_die(){
+	[ $1 -ne 0 ] && __exit $2
+}
+
+
+__bridge(){
+	brctl $@
+	if [ $? -ne 0 ]; then
+		__nvram_set WAN_MAC_ORIG 0 && __reboot
+		__check_error_not_die 1 "Error configuring $BRIDGE_IFACE with: $@"
+	fi
+}
+
+__reboot(){
+	echo -ne "Reboot in ";
+	for i in 5 4 3 2 1; do
+		echo -ne "$i ... "
+		sleep 1;
+	done
+	echo;
+	reboot;
+	exit
+}
+
+__kill_apps(){
+	echo "Killing apps ..."
+	for i in syslogd ntpclient dnsmasq; do
+		__run_s killall $i;
+	done
+}
+
+__gen_dev_node(){
+#Linux2.6 uses udev instead of devfs, we have to create static dev node by myself.
+	#mount -t ramfs mdev /dev
+	mkdir /dev/pts
+	mkdir /dev/net
+	mdev -s
+	mknod   /dev/video0      c       81      0
+	mknod   /dev/spiS0       c       217     0
+	mknod   /dev/i2cM0       c       218     0
+	mknod   /dev/flash0      c       200     0
+	mknod   /dev/swnat0      c       210     0
+	mknod   /dev/hwnat0      c       220     0
+	mknod   /dev/acl0        c       230     0
+	mknod   /dev/ac0         c       240     0
+	mknod   /dev/mtr0        c       250     0
+	mknod   /dev/nvram	     c       251     0
+	mknod   /dev/gpio        c       252     0
+	mknod   /dev/rdm0        c       253     0
+	mknod   /dev/pcm0        c       233     0
+	mknod   /dev/i2s0        c       234     0	
+	mknod   /dev/cls0        c       235     0
+	mknod 	/dev/net/tun 	 c		 10		 200
+}
+
+____wifi_radio_on(){
+	__log "Turn on the radio ..."
+	__iwp set RadioOn=1
+}
+
+____wifi_radio_off(){
+	__log "Turn off the radio ..."
+	__iwp set RadioOn=0
+}
+
+____iface_up(){
+	/sbin/ifconfig $1 0.0.0.0 up
+	__check_error $? "Error while init $1!"
+}
+
+____iface_set_addr(){
+	/sbin/ifconfig $@ up
+	__check_error $? "Error setting $2 to $1!"
+}
+
+__set_mac_addr(){
+	__log "Init mac addr for $1 ..."
+	orig="$(__nvram_get WAN_MAC_ORIG)"
+	if [ "x1" != "x$orig" ]; then
+		__log "MAC is not origin, processing ..."
+		mac="$(__gen_mac_addr)"
+		__log "Generated mac: $mac"
+		__nvram_set WAN_MAC_ADDR $mac
+		__nvram_set WAN_MAC_ORIG 1
+		__log "Reset network to default  ..."
+		__nvram_set wanConnectionMode DHCP
+#		__set_ip_addr 192.168.2.10
+#		__set_netmask 255.255.255.0
+#		__set_gateway 192.168.2.254
+		__nvram_set dhcpStart $DHCPD_RANGE_BEGIN
+		__nvram_set dhcpEnd $DHCPD_RANGE_END
+		__nvram_set dhcpGateway $DHCPD_GATEWAY
+		__nvram_set dhcpDomain $DHCPD_DOMAIN
+		postfix="$(echo $mac | awk -F ":" '{print $3"_"$4"_"$5"_"$6}')"
+		__set_ssid "$DEFAULT_WIFI_SSID_AP-$postfix"
+	fi
+	/sbin/ifconfig "$1" hw ether $(__nvram_get WAN_MAC_ADDR)
+	if [ $? -ne 0 ]; then
+		__nvram_set WAN_MAC_ORIG 0
+		__check_error_not_die 1 "Error setting mac addr for $VLAN_IFACE ! Rebooting!"
+		__reboot
+	fi
+}
+
+__iwp(){
+	/bin/iwpriv $WIFI_IFACE $@
+	__check_error_not_die $? "Error configuring $WIFI_IFACE with: iwpriv $WIFI_IFACE $1 $2";
+}
+
+____wifi_pre_for_enc(){ # Now, we support only WPA/WPA2 PSK with TKIP/AES
+	__iwp set SSID="$1" # For more info, see iwpriv_usage.txt
+	aut="$(__nvram_get AuthMode)"
+	[ "x" == "x$aut" ] && __log "Auth mode is empty, using WPA2PSK." && aut="WPA2PSK"
+	__log "Auth mode: $aut"
+	enc="$(__nvram_get EncrypType)"
+	pas="$(__nvram_get WPAPSK)"
+	
+	[ "x" == "x$enc" -o "xNONE" == "x$enc" ] && __log "Encrypt method is empty (or NONE), using TKIP." && enc="TKIP"
+	[ "x" == "x$pas" ] && __log "Password is empty, using 12345678."   && pas="12345678"
+	
+	__log "Encrypt method: $enc"
+	__log "Password: $pas"
+	
+	__iwp set AuthMode="$aut"
+	__iwp set EncrypType="$enc"
+	__iwp set WPAPSK="$pas"
+	__iwp set SSID="$1"
+}
+
+____wifi_pre_for_opn(){
+	__log "Network is OPEN"
+	__iwp set AuthMode=OPEN
+	__iwp set EncrypType=NONE
+}
+
+____wifi_init_ap(){
+	__log "Wifi: AP mode." ## Our network, will be always open.
+                           ## But! If you need encrypted, try to use ____wifi_pre_for_enc "my ssid"
+	____wifi_pre_for_opn
+	ssid="$(__nvram_get SSID1)"
+	[ "x" == "x$ssid" ] && ssid="$DEFAULT_WIFI_SSID_AP"
+	__iwp set SSID="$ssid"
+	if [ "x0" != "x$(__nvram_get STRICT_WIFI)" ]; then
+		____wifi_radio_off
+	else
+		____wifi_radio_on
+	fi
+	__acl_init
+}
+
+____wifi_init_sta(){
+	__log "Wifi: STA mode."
+	ss="$(__nvram_get STA_SSID)"
+	if [ "x" == "x$ss" ]; then
+		__log "STA_SSID is empty."
+	else
+		__log "Connecting to '$ss' ..."
+		aut="$(__nvram_get AuthMode)"
+		[ "x" == "x$aut" ] && __log "Auth mode is empty, using WPA2PSK." && aut="WPA2PSK"
+		if [ "xOPEN" != "x$aut" ]; then
+			____wifi_pre_for_enc "$ss"
+		else
+			____wifi_pre_for_opn
+		fi
+	fi
+	____wifi_radio_on
+	export DHCPD_IFACE=$BRIDGE_IFACE
+	export NAT_IFACE=$WIFI_IFACE
+}
+
+__insmod(){
+	__log "Loading $1 ..."
+	insmod "$1"
+	__check_error_not_die $? "Error inserting '$1' !"
+	#rm -f "$1" # Safe memory
+}
+
+__wifi_load_modules(){
+	case "$(__nvram_get WORK_MODE)" in
+		sta|STA|sta*|STA*) for i in /lib/modules/rt2860v2_sta*; do __insmod "$i"; done ;;
+		*)  for i in /lib/modules/rt2860v2_ap*;  do __insmod "$i"; done ;;
+	esac
+}
+
+__wifi_calibrate(){ # Not testing !!! ###
+                    # Refer to 'sta_ate_iwpriv_usage.txt'.
+	__log "Wifi: calibrating ..."
+	__iwp set ATE=ATESTART
+	__iwp set ATECHANNEL=1         # set Channel
+	__iwp set ATETXMODE=1          # set TX-Mode.
+	__iwp set ATETXMCS=3           # set MCS type.
+	__iwp set ATETXCNT=4000        # Tx frame count(decmial)
+	__iwp set ATETXFREQOFFSET=0    # Set frequency offset 0(decimal)
+	__iwp set ATE=TXFRAME          # Start Tx Frame
+	__iwp set ATE=TXCARR           # Start Tx carrier, Measure carrier frequency with instrument
+	__iwp set ATETXFREQOFFSET=10   # Dynamic turning frequency offset, 10(decimal)
+	__iwp set ATETXFREQOFFSET=20   # Dynamic turning frequency offset, 20(decimal)
+	__iwp set ATE=ATESTART
+	sleep 2
+	__iwp set ATE=ATESTOP          # Stop, Store the tuning result to EEPROM
+	__log "Wifi: calibrating done."
+}
+
+__wifi_init(){
+	__log "Wifi: init ..."
+	__log "Wifi: Restoring config from nvram ..."
+	ralink_init make_wireless_config rt2860
+	__log "Wifi: loading modules ..."
+	__wifi_load_modules
+	____iface_up $WIFI_IFACE
+	mode="$(__nvram_get WORK_MODE)"
+	case "$mode" in
+		sta|STA)	____wifi_init_sta;;
+		ap|AP)		____wifi_init_ap;;
+		*) __log "Wifi: mode '$mode' is unknown! Try to use 'ap' or 'sta'"; __log "Wifi is not configured!";;
+	esac
+	
+	## Apply our settings
+	
+	ch="$(__nvram_get Channel)"
+	bw="$(__nvram_get HT_BW)"
+	md="$(__nvram_get WirelessMode)"
+	pw="$(__nvram_get TxPower)"
+	
+	[ "x" == "x$ch" ] || __iwp set Channel="$ch"
+	[ "x" == "x$bw" ] || __iwp set HtBw="$bw"
+	[ "x" == "x$md" ] || __iwp set WirelessMode="$md"
+	[ "x" == "x$pw" ] || __iwp set TxPower="$pw"
+
+	    iptables -t nat -A POSTROUTING -o br0 -j MASQUERADE
+
+	__log "Wifi: init done."
+}
+
+__iface_init(){
+	__log "Starting network (stage 1) ..."
+	__set_mac_addr $VLAN_IFACE
+	____iface_up $VLAN_IFACE
+	__wifi_init
+	____iface_set_addr lo 127.0.0.1
+}
+
+__write(){
+	[ "x" == "x$1" -o "x" == "x$2" ] && __exit "Params error in __write()"
+	__log "Writing $1 to $2 ...";
+	# $1 from
+	# $2 to
+	mtd_write write $1 $2
+	__check_error_and_die $? "Error writing $1 to flash!"
+	rm $1
+}
+
+__get_free_mem(){
+	mem="$(free | awk '/Mem/{print $4}')"
+	[ "x$mem" == "x" ] && __check_error 1 "Error getting free mem info!"
+	echo $mem
+}
+
+__bridge_config_vlan(){
+	__run_s switch reg w 14 1555
+	__run_s switch reg w 40 1001
+	__run_s switch reg w 44 1001
+	__run_s switch reg w 48 1001
+	__run_s switch reg w 4c 1
+	__run_s switch reg w 50 2001
+	__run_s switch reg w 70 ffffffff
+	__run_s switch reg w 98 7f7f
+	__run_s switch reg w e4 7f
+}
+
+# arg1:  phy address.
+__switch_link_down(){
+	# get original register value
+	get_mii=`mii_mgr -g -p $1 -r 0`
+	orig=`echo $get_mii | sed 's/^.....................//'`
+
+	# stupid hex value calculation.
+	pre=`echo $orig | sed 's/...$//'`
+	post=`echo $orig | sed 's/^..//'` 
+	num_hex=`echo $orig | sed 's/^.//' | sed 's/..$//'`
+	case $num_hex in
+		"0")	rep="8"	;;
+		"1")	rep="9"	;;
+		"2")	rep="a"	;;
+		"3")	rep="b"	;;
+		"4")	rep="c"	;;
+		"5")	rep="d"	;;
+		"6")	rep="e"	;;
+		"7")	rep="f"	;;
+		# The power is already down
+		*)		__log "Warning in PHY reset script";return;;
+	esac
+	new=$pre$rep$post
+	# power down
+	__log "Port #${1} down ..."
+	__run_s mii_mgr -s -p "$1" -r 0 -v $new
+}
+
+__switch_link_up(){
+	# get original register value
+	get_mii=`mii_mgr -g -p "$1" -r 0`
+	orig=`echo $get_mii | sed 's/^.....................//'`
+
+	# stupid hex value calculation.
+	pre=`echo $orig | sed 's/...$//'`
+	post=`echo $orig | sed 's/^..//'` 
+	num_hex=`echo $orig | sed 's/^.//' | sed 's/..$//'`
+	case $num_hex in
+		"8")	rep="0"	;;
+		"9")	rep="1"	;;
+		"a")	rep="2"	;;
+		"b")	rep="3"	;;
+		"c")	rep="4"	;;
+		"d")	rep="5"	;;
+		"e")	rep="6"	;;
+		"f")	rep="7"	;;
+		# The power is already up
+		*)		__log "Warning in PHY reset script";return;;
+	esac
+	new=$pre$rep$post
+	# power up
+	__log "Port #${1} up ..."
+	__run_s mii_mgr -s -p "$1" -r 0 -v $new
+}
+
+__create_resolv(){
+	__log "Creating $RESOLV ..."
+	rm -f $RESOLV
+	a="$(__nvram_get wan_primary_dns)"
+	b="$(__nvram_get wan_secondary_dns)"
+	[ "x$a" == "x" ] && a=${DEFAULT_DNS_1}
+	[ "x$b" == "x" ] && b=${DEFAULT_DNS_2}
+	export DHCPD_DNS_1=$a
+	export DHCPD_DNS_2=$b
+	echo "nameserver $a" >> $RESOLV
+	echo "nameserver $b" >> $RESOLV
+}
+
+__get_dns_all(){
+	echo $(awk '/nameserver/{print $2}' $RESOLV)
+}
+
+____cmp_and_export(){
+	[ "x$1" != "x" ] && export $2=$1;
+}
+
+__init_dhcpd_params(){
+	[ "x1" == "x$DHCPD_INIT_PARAMS_DONE" ] && return
+	# Get from nvram
+	range_start="$(__nvram_get dhcpStart)"
+	range_end="$(__nvram_get dhcpEnd)"
+	#mask="$(__nvram_get 255.255.255.0)" # todo
+	dns_a="$(__nvram_get wan_primary_dns)"
+	dns_b="$(__nvram_get wan_secondary_dns)"
+	gateway="$(__nvram_get dhcpGateway)"
+	lease_time="$(__nvram_get dhcpLease)"
+	domain="$(__nvram_get dhcpDomain)"
+	
+	____cmp_and_export "192.168.182.2" DHCPD_RANGE_BEGIN
+	____cmp_and_export "192.168.182.252" DHCPD_RANGE_END
+	____cmp_and_export "$dns_a" DHCPD_DNS_1
+	____cmp_and_export "$dns_b" DHCPD_DNS_2
+	____cmp_and_export "192.168.182.1" DHCPD_GATEWAY
+	____cmp_and_export "$lease_time" DHCPD_LEASE_TIME
+	____cmp_and_export "$domain" DHCPD_DOMAIN
+	export DHCPD_INIT_PARAMS_DONE=1
+
+}
+
+____create_dhcpd_config(){
+	__log "Creating $DHCPD_CONF_FILE ..."
+	rm -f $DHCPD_CONF_FILE
+	__log "DHCPD: DNS_A: ${DHCPD_DNS_1}, DNS_B: ${DHCPD_DNS_2}"
+	cat << EOF > $DHCPD_CONF_FILE
+resolv-file=$RESOLV
+no-poll
+interface=$DHCPD_IFACE
+domain=$DHCPD_DOMAIN
+no-hosts
+addn-hosts=$HOSTS
+expand-hosts
+no-negcache
+cache-size=512
+dhcp-leasefile=$DHCPD_LOG
+dhcp-range=lan,$DHCPD_RANGE_BEGIN,$DHCPD_RANGE_END,$DHCPD_LEASE_TIME
+dhcp-option=lan,6,${DHCPD_DNS_1},${DHCPD_DNS_2}
+dhcp-option=lan,15,$DHCPD_DOMAIN
+dhcp-option=lan,3,$DHCPD_GATEWAY
+dhcp-vendorclass=lan,$DHCPD_DOMAIN
+dhcp-authoritative
+EOF
+}
+
+__get_mac_addr(){
+	# $1 = iface
+	mac="$(cat /sys/class/net/$1/address)";
+	[ "x$mac" == "x" ] && __check_error_not_die 1 "Error getting mac addr info for '$1'!" && mac="FF:FF:FF:FF:FF:FF"
+	echo $mac
+}
+
+__create_host_name(){
+	__get_mac_addr $VLAN_IFACE | md5sum | awk -F '' '{print $3 $5 $7 $8 $9 $2 $10 $13}'
+}
+
+__get_ssid(){
+	mode="$(__nvram_get WORK_MODE)"
+	if [ "xap" == "x$mode" ]; then
+		iwconfig $WIFI_IFACE | awk -F ':' '/SSID/{print $2}' | sed -e 's/\"//g'
+		__check_error $? "Error getting ssid info!"
+	else
+		__nvram_get STA_SSID
+	fi
+}
+
+____set_host_name(){
+	if [ "x$1" == "x" ]; then 
+		__exit "Error in param!"
+	elif [ "x$1" == "x0" ]; then
+		__nvram_set HOSTNAME_MODE 0
+	else
+		__nvram_set HOSTNAME_MODE 1
+		__nvram_set HostName "$1"
+	fi
+}
+
+____write_host_name(){
+	echo "$@" > /proc/sys/kernel/hostname
+}
+
+__set_host_name(){
+#
+#	mode="$(__nvram_get HOSTNAME_MODE)"
+#	name="$(__nvram_get HostName)"
+#	if [ "x$mode" == "x" -o "x$mode" == "x0" ]; then
+#		____write_host_name "$DHCPD_DOMAIN-$(__create_host_name)"
+#	else
+#		[ "x$name" == "x" ] && name="$DHCPD_DOMAIN-$(__create_host_name)"
+#		____write_host_name "$name" 
+#	fi
+#
+	____write_host_name "Alta"
+
+}
+
+____get_ip_addr(){
+	/sbin/ifconfig $1 | awk '/inet addr/{print $2}' | awk -F ':' '{print $2}'
+}
+
+____get_netmask_addr(){
+	/sbin/ifconfig $1 | awk '/Mask/{print $4}' | awk -F ':' '{print $2}'
+}
+
+____get_gateway_addr(){
+	ip r | awk '/default/{print $3}'
+}
+
+____get_gateway_dev(){
+	ip r | awk '/default/{print $5}'
+}
+
+__create_tz_data(){ #Todo for nvram
+	__log "Creating $TZ_DATA ..."
+	rm -f $TZ_DATA
+	echo "EET-2EEST,M3.5.0/3,M10.5.0/4" > $TZ_DATA
+}
+
+__create_hosts(){
+	__log "Creating $HOSTS ..."
+	rm -f $HOSTS
+	__set_host_name
+	echo "127.0.0.1 localhost.localdomain localhost" >> $HOSTS
+	#echo "::1		localhost6.localdomain6 localhost6" >> $HOSTS
+	echo "127.0.0.1 $(hostname)" >> $HOSTS
+}
+
+__create_upnp_conf(){
+	__log "Creating $UPNP_CONF ..."
+    rm -f $UPNP_CONF
+    cat << EOF > $UPNP_CONF
+
+minissdpdsocket=/var/run/minissdpd.sock
+friendly_name=$DHCPD_DOMAIN
+lease_file=/var/upnp_leases
+enable_natpmp=yes
+enable_upnp=yes
+bitrate_up=3500000
+bitrate_down=24000000
+secure_mode=no
+system_uptime=yes
+notify_interval=60
+clean_ruleset_threshold=20
+clean_ruleset_interval=600
+allow 1024-65535 0.0.0.0/0 1024-65535
+model_number=1
+EOF
+}
+
+
+__create_services(){
+	__log "Creating $SERVICES ..."
+	rm -f $SERVICES
+	cat << EOF > $SERVICES
+domain          53/tcp
+domain          53/udp
+http            80/tcp          www www-http    # WorldWideWeb HTTP
+http            80/udp          www www-http    # HyperText Transfer Protocol
+http            80/sctp                         # HyperText Transfer Protocol
+https           443/tcp                         # http protocol over TLS/SSL
+https           443/udp                         # http protocol over TLS/SSL
+https           443/sctp                        # http protocol over TLS/SSL
+EOF
+}
+
+__create_cron_config(){
+	cron_file="$CRON_DIR/$1"
+	__log "Creating $cron_file ..."
+	rm -f "$cron_file"
+	
+	# Load balancing
+	fl_time=$(($RANDOM % 59))
+
+	cat << EOF > $cron_file
+# m h d m dow
+
+# SNMP monitoring
+
+# Flush route cache
+$fl_time * * * * echo 1 > /proc/sys/net/ipv4/route/flush
+
+EOF
+}
+
+__cron_init(){
+	__log "Starting crond ..."
+	crond
+}
+
+__get_owner_user(){
+	awk -F ':' '/bin\/sh/{print $1}' /etc/passwd
+}
+
+__create_global_configs(){
+	# Must be called AFTER __create_auth_configs
+	[ ! -e "$RESOLV" ]           && __create_resolv   # done
+	[ ! -e "$HOSTS"  ]           && __create_hosts    # done
+	[ ! -e "$TZ_DATA" ]          && __create_tz_data  # done
+	[ ! -e "$SERVICES" ]         && __create_services # done
+	# Cron
+	cron_user="$(__get_owner_user)"
+	[ ! -e "$CRON_DIR/$cron_user" ] && __create_cron_config "$cron_user"
+}
+
+__run_dhcpd(){
+	run="$(__nvram_get dhcpEnabled)"
+	cpt="$(__nvram_get STRICT_WIFI)"
+	if [ "x1" != "x$run" ]; then
+		__log "DHCPD: '$DHCPD' disabled."
+		return;
+	fi
+	__init_dhcpd_params
+	[ ! -e "$DHCPD_CONF_FILE" ] && ____create_dhcpd_config
+	__log "Running dhcpd '$DHCPD' on $DHCPD_IFACE ..."
+	__log "DHCPD: config file: $DHCPD_CONF_FILE"
+	____iface_set_addr $DHCPD_IFACE $DHCPD_GATEWAY
+	if [ "x0" != "x$cpt" ]; then
+		$DHCPD -u $(__get_owner_user) &
+	else
+		$DHCPD &
+	fi
+}
+
+__ips(){
+	/bin/iptables $@;
+	__check_error_not_die $? "Error configuring iptables: $@!"
+}
+
+
+__need_header(){
+	[ "x" == "x$1" ] && return
+	if [ -e "/sbin/$1" ]; then
+		__log "Loading '/sbin/$1' ..."
+		source "/sbin/$1"
+	elif [ -e "./$1" ]; then
+		__log "Loading './$1' ..."
+		source "./$1"
+	else
+		__check_error_not_die 1 "Error: header '$1' not found in '$PWD' or '/sbin'!";
+	fi
+}
+
+__sync_time(){
+	ntp="$(__nvram_get NTPServerIP)"
+	[ "x" == "x$ntp" ] && ntp=$DEFAULT_NTP
+	__log "Syncing time with $ntp ..."
+	__run_s ntpclient -s -h $ntp -c 1
+}
+
+__bridge_init(){
+	__log "Adding bridge to system ..."
+	__bridge addbr $BRIDGE_IFACE
+	__bridge setfd $BRIDGE_IFACE 1
+	click="$(__nvram_get stpEnabled)"
+	[ "x" == "x$click" ]  && click=0
+	[ "x1" == "x$click" ] && __log "STP: enabled" || __log "STP: disabled"
+	__bridge stp $BRIDGE_IFACE $click
+	for i in /proc/sys/net/bridge/*; do echo 0 > $i; done # Stop filter
+}
+
+____create_auth_configs(){
+	[ "x$1" == "x" -o "x$2" == "x" ] && __nvram_set AUTH_MODE 0 && __create_auth_configs
+	echo "$1::0:0:root:/:/bin/sh" > /etc/passwd
+	echo "nobody::666:666:nobody:/dev/null:/bin/vi" >> /etc/passwd # Need for dnsmasq
+	echo "$1:x:0:$1" > /etc/group
+	echo "" > /etc/shadow
+	echo "$1:$2" | __run_s chpasswd 
+}
+
+__create_auth_configs(){
+	__log "Creating auth tokens ..."
+	mode="$(__nvram_get AUTH_MODE)" # if 1, login && pass from nvram, else, from $SYS_{USER,PASS}
+	if [ "x1" == "x$mode" ]; then
+		__log "Using auth params from nvram ..."
+		____create_auth_configs "$(__nvram_get Login)" "$(__nvram_get Password)"
+	else
+		__log "Using build-in auth params ..."
+		____create_auth_configs $SYS_USER $SYS_PASS
+	fi
+}
+
+__set_bridge_mode(){
+	need="$(__nvram_get NEED_BR)"
+	if [ "x1" != "x$need" ]; then
+		__check_error_not_die 1 "Bridge $BRIDGE_IFACE is disabled."
+		return;
+	fi
+	__log "Settings up bridge mode ..."
+	__bridge_init
+	__log "Configuring vlan ..."
+	__bridge_config_vlan
+	__log "Adding $VLAN_IFACE to bridge ..."
+	__bridge addif $BRIDGE_IFACE $VLAN_IFACE
+	__log "Turn on bridge ..."
+	____iface_up $BRIDGE_IFACE
+	__log "All done."
+}
+
+__sshd_gen_keys(){
+	[ -d "/etc/dropbear" ] || mkdir /etc/dropbear
+	
+	# Use build-in or generate new keys ?
+	rsa_mode="$(__nvram_get SSHD_RSA_KEY_MODE)"
+	dss_mode="$(__nvram_get SSHD_DSS_KEY_MODE)"
+	
+	# RSA key
+	if [ "x1" != "x$rsa_mode" -a -e "/etc_ro/ssh/rsa" ]; then
+		__log "SSHD: using build-in RSA key ..."
+		cp /etc_ro/ssh/rsa $SSHD_RSA_KEY
+	else
+		__log "SSHD: generating RSA key ..."
+		__run_s $SSHD_KEY_GEN -t rsa -f $SSHD_RSA_KEY
+	fi
+	
+	# DSS key
+	if [ "x1" != "x$dss_mode" -a -e "/etc_ro/ssh/dss" ]; then
+		__log "SSHD: using build-in DSS key ..."
+		cp /etc_ro/ssh/dss $SSHD_DSS_KEY
+	else
+		__log "SSHD: generating DSS key ..."
+		__run_s $SSHD_KEY_GEN -t dss -f $SSHD_DSS_KEY
+	fi
+}
+
+__sshd_daemon(){
+	__log "SSHD: starting daemon ..."
+	echo "" > /var/log/wtmp
+	echo "" > /var/log/lastlog
+	$SSHD &
+}
+
+__sshd_init(){
+	__log "Starting sshd ..."
+	__sshd_gen_keys
+	__sshd_daemon
+}
+
+__ssh_tun_init(){ # SSH tunnel with REMOTE port forwarding
+	enable="$(__nvram_get FORWARD_ENABLED)"
+	user="$(__nvram_get FORWARD_USER)"
+	pass="$(__nvram_get FORWARD_PASS)"
+	server="$(__nvram_get FORWARD_SERVER)"
+	server_port="$(__nvram_get FORWARD_SERVER_PORT)"
+	access_port="$(__nvram_get FORWARD_ACCESS_PORT)"
+	# ...
+	# ToDo!
+	# ...
+}
+
+__get_ntp(){
+	t="$(__nvram_get NTPServerIP)"
+	[ "x" == "x$t" ] && t=$DEFAULT_NTP
+	echo "$t"
+}
+
+__get_dns_p(){
+	t="$(__nvram_get wan_primary_dns)"
+	[ "x" == "x$t" ] && t="$DEFAULT_DNS_1"
+	echo "$t"
+}
+
+__get_dns_s(){
+	t="$(__nvram_get wan_secondary_dns)"
+	[ "x" == "x$t" ] && t="$DEFAULT_DNS_2"
+	echo "$t"
+}
+
+__get_nat(){
+	t="$(__nvram_get natEnabled)"
+	[ "x" == "x$t" -o "x0" == "x$t" ] && echo "NAT disabled. (0)" || echo "NAT enabled. (1)"
+}
+
+__get_sshd(){
+	t="$(__nvram_get SSHD)"
+	[ "x" == "x$t" -o "x0" == "x$t" ] && echo "SSHD disabled. (0)" || echo "SSHD enabled. (1)"
+}
+
+__get_ign_err(){
+	t="$(__nvram_get IGNORE_ERR)"
+	[ "x" == "x$t" -o "x0" == "x$t" ] && echo "Errors not ignored. (SAFE)" || echo "Ignored all errors. (UNSAFE!)"
+}
+
+__get_auth_mode(){
+	mode="$(__nvram_get AUTH_MODE)"
+	if [ "x1" == "x$mode" ]; then
+		echo "Auth mode: nvram.";
+	else
+		echo "Auth mode: build-in."
+	fi
+}
+
+____get_val_global(){
+	case $1 in
+		dns_pr)    __get_dns_p;;
+		dns_sec)   __get_dns_s;;
+		ntp)       __get_ntp;;
+		hname)     hostname;;
+		nat)       __get_nat;;
+		max_con)   __nvram_get IP_CONN_MAX;;
+		ign_err)   __get_ign_err;;
+		sshd)      __get_sshd;;
+		auth)      __get_auth_mode;;
+		login)     __nvram_get Login;;
+		pass)      __nvram_get Password;;
+		init)      __nvram_get INIT;;
+		hw_nat)    __nvram_get HW_NAT;;
+		tune)      __nvram_get TUNE_NET;;
+		*) __exit "Error: command '$1' not defined!";
+	esac
+}
+
+____get_dhcp_bridge(){
+	case "$(__nvram_get wanConnectionMode)" in
+		STATIC) echo "DHCP disabled. (0)";;
+		*)      echo "DHCP enabled.  (1)";;
+	esac
+}
+
+__params_error(){
+	__exit "Error in params!"
+}
+
+__tune_network(){ # Some network stuff ...
+	a="$(__nvram_get IP_CONN_MAX)"
+	[ "x$a" == "x" ] && a=2000000
+	__run_s sysctl -w -p -n -e /etc_ro/sysctl.conf
+
+	echo "$a"	> /proc/sys/net/ipv4/netfilter/ip_conntrack_max
+	echo 200000 > /proc/sys/net/ipv4/route/max_size
+	echo 60000	> /sys/module/nf_conntrack/parameters/hashsize
+	echo 180 	> /proc/sys/net/ipv4/netfilter/ip_conntrack_udp_timeout
+	echo 180 	> /proc/sys/net/ipv4/netfilter/ip_conntrack_tcp_timeout_established
+	echo 1 		> /proc/sys/net/ipv4/ip_forward
+	echo 2 		> /proc/sys/net/ipv6/conf/$BRIDGE_IFACE/dad_transmits
+	echo 1      > /proc/sys/kernel/panic
+    echo 1      > /proc/sys/kernel/panic_on_oops
+    echo 1      > /proc/sys/vm/panic_on_oom
+	
+	a="$(__nvram_get NET_TTL)"
+	[ "x" == "x$a" ] && a=69
+	
+	echo "$a" 	> /proc/sys/net/ipv4/ip_default_ttl
+	
+	## Need for updating
+	echo 10 > /proc/sys/vm/min_free_kbytes
+	
+	ulimit -c 0
+	ulimit -n 32768
+	ulimit -v unlimited
+	ulimit -m unlimited
+	__run_s sysctl -w vm.overcommit_ratio=100
+	__run_s sysctl -w vm.overcommit_memory=2
+	__run_s sysctl -w kernel.domainname="$DHCPD_DOMAIN"
+}
+
+____get_val_bridge(){
+	case $1 in
+		gateway) ____get_gateway_addr;;
+		netmask) ____get_netmask_addr $BRIDGE_IFACE;;
+		ip)      ____get_ip_addr $BRIDGE_IFACE;;
+		full)    echo "$(____get_ip_addr $BRIDGE_IFACE) $(____get_netmask_addr $BRIDGE_IFACE) $(____get_gateway_addr)";;
+		mac)     __get_mac_addr $BRIDGE_IFACE;;
+		dhcp)    ____get_dhcp_bridge;;
+		stp)     __nvram_get stpEnabled;;
+		*)       ____get_val_global $1;;
+	esac
+}
+
+____get_val_wifi(){
+	__init_dhcpd_params
+	case $1 in
+		ssid) __get_ssid;;
+		channel) __nvram_get Channel;;
+		ip) echo   $DHCPD_GATEWAY;;
+		dhcp_rb)   echo $DHCPD_RANGE_BEGIN;;
+		dhcp_re)   echo $DHCPD_RANGE_END;;
+		dhcp_tm)   echo $DHCPD_LEASE_TIME;;
+		dhcp_dm)   echo $DHCPD_DOMAIN;;
+		power)     __nvram_get TxPower;;
+		wmode)     __get_work_mode;;
+		mac)       __get_mac_addr $WIFI_IFACE;;
+		mode)      echo "Mode: $(__nvram_get WirelessMode) ($(____get_wireless_mode))";;
+		bandwidth) t="$(__nvram_get HT_BW)"; [ "x$t" == "x0" ] && a=20 || a=40;	echo "BandWidth mode: $t ($a Hz).";;
+		bgprot)    t="$(__nvram_get BGProtection)"; echo "11B/11G Protection: $t";;
+		txprmb)    t="$(__nvram_get TxPreamble)"; echo "TxPreamble: $t";;
+		*) ____get_val_global $1
+	esac
+}
+
+__set_gateway(){
+	[ "x$1" == "x" ] && __exit "Error in params!"
+	__nvram_set wan_gateway $1
+}
+
+__set_netmask(){
+	[ "x$1" == "x" ] && __exit "Error in params!"
+	__nvram_set wan_netmask $1
+}
+
+__set_ip_addr(){
+	[ "x$1" == "x" ] && __exit "Error in params!"
+	__nvram_set wan_ipaddr $1
+}
+
+__update_mac(){
+	[ "x$1" == "x" ] && __exit "Error in params!"
+	if [ "x0" == "x$1" ]; then
+		__nvram_set WAN_MAC_ORIG 0
+	else
+		__nvram_set WAN_MAC_ORIG 1
+		__nvram_set WAN_MAC_ADDR "$1"
+	fi
+}
+
+__set_dhcp_mode(){
+	if [ "x$1" == "x1" ]; then
+		__log "Connection mode was switched to dhcp ..."
+		__nvram_set wanConnectionMode DHCP
+	elif [ "x$1" == "x0" ]; then
+		__log "Connection mode was switched to static ..."
+		__nvram_set wanConnectionMode STATIC
+	else
+		__exit "Error in params! Need 1 or 0";
+	fi
+}
+
+
+____set_val_global(){
+	case $1 in
+		dns_pr)    __nvram_set wan_primary_dns $2;;
+		dns_sec)   __nvram_set wan_secondary_dns $2;;
+		ntp)       __nvram_set NTPServerIP $2;;
+		hname)     ____set_host_name $2;;
+		nat)	   __nvram_set natEnabled $2;;
+		max_con)   __nvram_set IP_CONN_MAX $2;;
+		ign_err)   __nvram_set IGNORE_ERR $2;;
+		sshd)      __nvram_set SSHD $2;;
+		auth)      __nvram_set AUTH_MODE $2;;
+		login)     __nvram_set Login $2;;
+		pass)      __nvram_set Password $2;;
+		init)      __nvram_set INIT $2;;
+		hw_nat)    __nvram_set HW_NAT $2;;
+		tune)      __nvram_set TUNE_NET $2;;
+		*) __exit "Error: command '$1' not defined!";;
+	esac
+}
+
+
+____set_val_bridge(){
+	case $1 in
+		gateway) __set_gateway $2;;
+		netmask) __set_netmask $2;;
+		ip)      __set_ip_addr $2;;
+		mac)     __update_mac  $2;;
+		dhcp)    __set_dhcp_mode $2;;
+		stp)	 __nvram_set stpEnabled $2;;
+		*)       ____set_val_global $1 $2;;
+	esac
+}
+
+__get_auth_host(){
+	host="$(__nvram_get AUTH_HOST)"
+	if [ "x" == "x$host" ]; then
+		echo "$DEFAULT_AUTH_HOST"
+	else
+		echo "$host"
+	fi
+}
+
+
+____nat_load_modules(){
+	ins=0
+	__log "Inserting module(s) for hardware nat ..."
+	for i in /lib/modules/*nat*ko*; do
+		__insmod $i;
+		ins=$(($ins + 1))
+	done
+	[ "x0" == "x$ins" ] && __log "Modules for hardware nat not found ..." 
+}
+
+
+__set_nat(){
+	x="$(__nvram_get natEnabled)"
+	[ "x0" == "x$x" ] && __log "NAT disabled." && return
+	____nat_load_modules
+	__log "NAT enabled." 
+}
+
+____get_wireless_mode(){
+	mode="$(__nvram_get WirelessMode)"
+	mode_human="";
+	case "$mode" in
+		0)mode_human="legacy 11b/g mixed";;
+		1)mode_human="legacy 11B only";;
+		2)mode_human="legacy 11A only";;
+		3)mode_human="legacy 11a/b/g mixed";;
+		4)mode_human="legacy 11G only";;
+		5)mode_human="11ABGN mixed";;
+		6)mode_human="11N only";;
+		7)mode_human="11GN mixed";;
+		8)mode_human="11AN mixed";;
+		9)mode_human="11BGN mixed";;
+		10)mode_human="11AGN mixed";;
+		*)mode_human="Unknown mode: $mode";;
+	esac
+	echo "$mode_human"
+}
+
+__get_channel(){
+	iwconfig $WIFI_IFACE | awk -F '=' '/Channel/{print $2}' | awk '{print $1}'
+}
+
+__get_work_mode(){
+	case "$(__nvram_get WORK_MODE)" in
+		ap) echo "AP mode";;
+		*)  echo "STA mode";;
+	esac
+}
+
+show_net_settings_br__(){
+	echo "Bridge: $BRIDGE_IFACE"
+	echo -e "\tMode:           $(__nvram_get wanConnectionMode)"
+	echo -e "\tIP:             $(____get_ip_addr $BRIDGE_IFACE)"
+	echo -e "\tNetmask:        $(____get_netmask_addr $BRIDGE_IFACE)"
+	echo -e "\tGateway:        $(____get_gateway_addr)"
+	echo -e "\tMac addr:       $(__get_mac_addr $BRIDGE_IFACE)"
+	echo -e "\tDNS:            $(__get_dns_all)"
+}
+
+show_net_settings_ra__(){
+	echo "WiFi: $WIFI_IFACE"
+	echo -e "\tType:           $(__get_work_mode)"
+	echo -e "\tIP:             $(____get_ip_addr $WIFI_IFACE)"
+	echo -e "\tNetmask:        $(____get_netmask_addr $WIFI_IFACE)"
+	echo -e "\tMac addr:       $(__get_mac_addr $WIFI_IFACE)"
+	echo -e "\tSSID:           $(__get_ssid)"
+	echo -e "\tMode:           $(____get_wireless_mode)"
+	echo -e "\tChannel:        $(__get_channel)"
+	t="$(__nvram_get HT_BW)"
+	[ "x$t" == "x0" ] && t=20 || t=40
+	echo -e "\tBandWidth:      $t Hz"
+	echo -e "\tTransmit power: $(__nvram_get TxPower)"
+}
+
+show_version_info__(){
+	echo "Firmware:"
+	__need_header version
+	if [ "x$FIRM_DATE" == "x" ]; then
+		echo -e "\tNo information avaible";
+	else
+		echo -e "\tDate:    $FIRM_DATE"
+		echo -e "\tBuildID: $FIRM_BUILD_ID"
+	fi
+}
+
+__configure_for_static(){
+	ip="$(__nvram_get wan_ipaddr)"
+	mask="$(__nvram_get wan_netmask)"
+	gateway="$(__nvram_get wan_gateway)"
+	if [ "x1" == "x$NEED_MAC_REPORT" ]; then
+		ip="$(ip_check $ip)"
+		__set_ip_addr "$ip"
+	fi
+	/sbin/ifconfig $BRIDGE_IFACE $ip netmask $mask up # ____iface_set_addr ?_?
+	__check_error $? "Error while configuring network by ifconfig!"
+	ip route add default via $gateway dev $BRIDGE_IFACE
+	__check_error $? "Error adding default gateway $gateway for dev $BRIDGE_IFACE"
+}
+
+__configure_for_dhcp(){
+	__log "Running dhcp client on $1 ..."
+	/sbin/udhcpc -S -i $1 -s /sbin/udhcpc.sh -p /var/run/udhcpc.pid &
+}
+
+__fs_init(){
+	__log "Mounting filesystem ..."
+	mount -t ramfs none /media;
+	mount -t devpts  none /dev/pts 
+	mount -o remount,rw /
+}
+
+__test_mac_addr(){
+	mac="$(echo $1 | awk '{print toupper($1)}' | sed -n '/^\([0-9A-Z][0-9A-Z]:\)\{5\}[0-9A-Z][0-9A-Z]$/p')"
+	if [ "x" == "x$mac" ]; then return 1; else return 0; fi
+}
+
+__work_dir_init(){
+	__log "Creating system dirs ..."
+	mkdir -p /var/run
+	mkdir -p /var/log
+	mkdir -p /var/twrt
+	mkdir -p /var/cache
+	mkdir -p /etc/Wireless
+	mkdir -p /etc/dropbear
+	mkdir -p "$CRON_DIR"
+}
+
+__led_wifi_on(){
+	__iwp set WlanLed=1
+}
+
+__led_port_0_off(){
+	__run_s switch reg w 0x00a4 0x9
+}
+
+__led_port_1_off(){
+	__run_s switch reg w 0x00a8 0x9
+}
+
+__led_port_2_off(){
+	__run_s switch reg w 0x00ac 0x9
+}
+
+__led_port_3_off(){
+	__run_s switch reg w 0x00b0 0x9
+}
+
+__led_port_4_off(){
+	__run_s switch reg w 0x00b4 0x9
+}
+
+__led_port_0_on(){
+	__run_s switch reg w 0x00a4 0x5
+}
+
+__led_port_1_on(){
+	__run_s switch reg w 0x00a8 0x5
+}
+
+__led_port_2_on(){
+	__run_s switch reg w 0x00ac 0x5
+}
+
+__led_port_3_on(){
+	__run_s switch reg w 0x00b0 0x5
+}
+
+__led_port_4_on(){
+	__run_s switch reg w 0x00b4 0x5
+}
+
+__led_switch_off(){
+	__led_port_0_off
+	__led_port_1_off
+	__led_port_2_off
+	__led_port_3_off
+	__led_port_4_off
+}
+
+__led_switch_on(){
+	__led_port_0_on
+	__led_port_1_on
+	__led_port_2_on
+	__led_port_3_on
+	__led_port_4_on
+}
+
+__led_wifi_off(){
+	__iwp set WlanLed=0
+}
+
+__led_status_on(){
+	gpio l $GPIO_PIN_LED 0 4000 0 1 4000
+}
+
+__led_status_off(){
+	gpio l $GPIO_PIN_LED 4000 0 1 0 4000
+}
+
+__led_status_blink(){
+	gpio l $GPIO_PIN_LED 2 1 4000 1 4000
+}
+
+__led_turn_off(){
+	__led_wifi_off
+	__led_status_off
+	__led_switch_off
+}
+
+__led_turn_on(){
+	__led_wifi_on
+	__led_status_on
+	__led_switch_on
+}
+
+__configure_network(){
+	__log "Starting network (stage 2) ..."
+	mode="$(__nvram_get wanConnectionMode)"
+	__log "Mode: $mode"
+	sta="$(__nvram_get WORK_MODE)"
+	if [ "xsta" == "x$sta" ]; then
+		__log "Configuring $WIFI_IFACE to work in STA mode ...";
+		__configure_for_dhcp $WIFI_IFACE
+		return
+		## We dont need to configure $BRIDGE_IFACE, because we running $DHCPD on it
+	fi
+	
+	
+	case $mode in
+		STATIC) __configure_for_static;;
+		*) __configure_for_dhcp $BRIDGE_IFACE;;
+	esac
+	[ "x$mode" == "xSTATIC" ] && __log "Network is configured."
+#	__event "Init: network is configured";
+	__log "Init: network is configured"
+}
+
+____set_wireless_mode(){
+	if [ $1 -le 0 -o $1 -gt 10 ]; then
+		__exit "Error in params!";
+	fi
+	__nvram_set WirelessMode $1;
+}
+
+__set_ssid(){
+	mode="$(__nvram_get WORK_MODE)";
+	if [ "xsta" == "x$mode" ]; then
+		__nvram_set STA_SSID "$1";
+	else # We use AP mode as default
+		__nvram_set SSID1 "$1";
+	fi
+}
+
+____set_val_wifi(){
+	case "$1" in
+		ssid)      __set_ssid "$2";;
+		channel)   __nvram_set Channel "$2";;
+		ip)        __nvram_set dhcpGateway "$2";;
+		dhcp_rb)   __nvram_set dhcpStart "$2";;
+		dhcp_re)   __nvram_set dhcpEnd "$2";;
+		dhcp_tm)   __nvram_set dhcpLease "$2";;
+		dhcp_dm)   __nvram_set dhcpDomain "$2";;
+		mac)       echo "Changing MAC addr of '$WIFI_IFACE' is not supported now.";;
+		mode)      ____set_wireless_mode "$2";;
+		wmode)     __nvram_set WORK_MODE "$2";;
+		bandwidth) __nvram_set HT_BW "$2";;
+		bw)        __nvram_set HT_BW "$2";;
+		bgprot)    __nvram_set BGProtection "$2";;
+		txprmb)    __nvram_set TxPreamble "$2";;
+		power)     __nvram_set TxPower "$2";;
+		*)         ____set_val_global "$1" "$2";;
+	esac
+}
+
+__nvram_null_and_default(){
+	[ "x" == "x$(__nvram_get $1)" ] && __nvram_set "$1" "$2"
+}
+
+__default_params_init(){
+	__log "Checking default params ..."
+	# Most critical system params
+	[ "x" == "x$(__nvram_get dhcpEnabled)" ]		&& __nvram_set dhcpEnabled $DEFAULT_DHCPD_ENABLED
+	[ "x" == "x$(__nvram_get natEnabled)" ] 		&& __nvram_set natEnabled $DEFAULT_NAT_ENABLE
+	[ "x" == "x$(__nvram_get HW_NAT)" ]				&& __nvram_set HW_NAT $DEFAULT_HWNAT_ENABLE
+	[ "x" == "x$(__nvram_get INIT)" ]				&& __nvram_set INIT $DEFAULT_INIT_ENABLE
+	[ "x" == "x$(__nvram_get AUTH_MODE)" ]			&& __nvram_set AUTH_MODE $DEFAULT_AUTH_ENABLE
+	if [ "x" == "x$(__nvram_get SSID1)" ]; then
+		if [ "x1" == "x$(__nvram_get WAN_MAC_ORIG)" ]; then
+			postfix="$(__nvram_get WAN_MAC_ADDR | awk -F ":" '{print $3"_"$4"_"$5"_"$6}')"
+		else
+			postfix="$(dd if=/dev/urandom bs=1 count=128 2>/dev/null | md5sum | awk -F "" '{print $1 $6 $4 $12 $13 $3 $7 $9}')"
+		fi
+		__set_ssid "$DEFAULT_WIFI_SSID_AP-$postfix"
+	fi
+	[ "x" == "x$(__nvram_get Channel)" ]			&& __nvram_set Channel $DEFAULT_WIFI_CHANNEL
+	[ "x" == "x$(__nvram_get WirelessMode)" ]		&& __nvram_set WirelessMode $DEFAULT_WIFI_MODE
+	[ "x" == "x$(__nvram_get WORK_MODE)" ]			&& __nvram_set WORK_MODE "$DEFAULT_WIFI_WORK_MODE"
+	[ "x" == "x$(__nvram_get wanConnectionMode)" ]	&& __nvram_set wanConnectionMode "$DEFAULT_CONN_MODE"
+	
+	## Captive portal is off by default
+	[ "x" == "x$(__nvram_get STRICT_WIFI)" ]		 && __nvram_set STRICT_WIFI $DEFAULT_STRICT_WIFI
+	
+	[ "x" == "x$(__nvram_get NEED_BR)" ]			&& __nvram_set NEED_BR $DEFAULT_BRIDGE_ENABLED
+	[ "x" == "x$(__nvram_get HOSTNAME_MODE)" ]		&& __nvram_set HOSTNAME_MODE $DEFAILT_HOSTNAME_MODE
+	[ "x" == "x$(__nvram_get TUNE_NET)" ]           && __nvram_set TUNE_NET $DEFAULT_TUNE_NET_ENABLED
+	[ "x" == "x$(__nvram_get UDPXY_ENABLED)" ]      && __nvram_set UDPXY_ENABLED $DEFAULT_UDPXY_ENABLED
+	[ "x" == "x$(__nvram_get UDPXY_PORT)" ]     	&& __nvram_set UDPXY_PORT $DEFAULT_UDPXY_PORT
+	[ "x" == "x$(__nvram_get IGMPPROXY_ENABLED)" ]  && __nvram_set IGMPPROXY_ENABLED $DEFAULT_IGMPPROXY_ENABLED
+	[ "x" == "x$(__nvram_get SNMP_SERVER)" ]  		&& __nvram_set SNMP_SERVER $DEFAULT_SNMP_SERVER
+	[ "x" == "x$(__nvram_get UPNP_ENABLED)" ]		&& __nvram_set UPNP_ENABLED $DEFAULT_UPNP_ENABLED
+	[ "x" == "x$(__nvram_get REMOTE_SYSLOG)" ]		&& __nvram_set REMOTE_SYSLOG $DEFAULT_REMOTE_SYSLOG
+	[ "x" == "x$(__nvram_get STREAM_ENABLED)" ]		&& __nvram_set STREAM_ENABLED $DEFAULT_STREAM_ENABLED
+	[ "x" == "x$(__nvram_get IdsEnable)" ]			&& __nvram_set IdsEnable $DEFAULT_IDS_ENABLED
+	if [ "x1" == "x$(__nvram_get IdsEnable)" ]; then
+		__nvram_null_and_default AuthFloodThreshold			32
+		__nvram_null_and_default AssocReqFloodThreshold		32
+		__nvram_null_and_default ReassocReqFloodThreshold	32
+		__nvram_null_and_default ProbeReqFloodThreshold		32
+		__nvram_null_and_default DisassocFloodThreshold		32
+		__nvram_null_and_default DeauthFloodThreshold		32
+		__nvram_null_and_default EapReqFooldThreshold		32
+	fi
+	[ "x" == "x$(__nvram_get TxRate)" -o "x0" == "x$(__nvram_get TxRate)" ]	&& __nvram_set TxRate 11
+	__nvram_null_and_default TxPower 100
+	__nvram_null_and_default HT_BW 0 # 0 - 20 Mhz, 1 - 40 Mhz
+	
+	## ApCli params 
+	__nvram_null_and_default ApCliEnable 0
+	__nvram_null_and_default ApCliTxMcs 33
+	__nvram_null_and_default ApCliTxMode ht
+	__nvram_null_and_default ApCliAuthMode OPEN
+	__nvram_null_and_default ApCliEncrypType NONE
+	__nvram_null_and_default ApCliWPAPSK 12345678
+	
+	## ACL
+	__nvram_null_and_default AccessPolicy 0
+	## 0 - disable
+	## 1 - white list
+	## 2 - black list
+	
+	## Led hide, off by default
+	__nvram_null_and_default HIDE_MODE 0
+
+	## HT_BW
+	__nvram_null_and_default HT_BW 0
+	
+	__log "Done."
+}
+
+__udpxy_init(){
+	[ "x0" == "x$(__nvram_get UDPXY_ENABLED)" ] && __log "udpxy is disabled." && return;
+	port="$(__nvram_get UDPXY_PORT)"
+	[ "x" == "x$port" ] && port=$DEFAULT_UDPXY_PORT
+	__log "Starting '$UDPXY' on port $port ..."
+	__run_s $UDPXY -p $port -c 250 -a $WIFI_IFACE -m $BRIDGE_IFACE
+}
+
+__disconnect_sta(){
+	# $1 - mac: ff:ff:ff:ff:ff:ff
+	__iwp set DisConnectSta="$1"
+}
+
+__log_system_init(){
+	__log "Starting log system ..."
+	klogd &
+}
+
+
+__disconnect_all(){
+	__iwp set DisConnectAllSta=1
+}
+
+__igmpproxy_init(){
+	[ "x0" == "x$(__nvram_get IGMPPROXY_ENABLED)" ] && __log "igmpproxy is disabled." && return;
+	cat << EOF > $IGMPPROXY_CONF
+	
+quickleave
+phyint $BRIDGE_IFACE upstream ratelimit 0 threshold 1
+altnet 0.0.0.0/0
+phyint $WIFI_IFACE downstream ratelimit 0 threshold 1
+
+EOF
+
+	__log "Starting igmpproxy ..."
+	__run_s igmpproxy $IGMPPROXY_CONF
+}
+
+__multicast_init(){
+	__udpxy_init
+	__igmpproxy_init
+}
+
+__safe_panic(){
+	echo 1 > /proc/sys/kernel/panic
+}
+
+__hide_off(){
+	__nvram_set HIDE_MODE 0
+	__led_turn_on
+}
+
+__hide_on(){
+	__nvram_set HIDE_MODE 1
+	__led_turn_off
+}
+
+__post_init(){
+	__led_turn_on
+	if [ "x0" != "x$(__nvram_get HIDE_MODE)" ]; then
+		__log "Activating LED hide mode ..."
+		__led_turn_off
+	fi
+#	__event "Init: done";
+	__log "Init: network is configured"
+}
+
+__upnp_init(){
+	[ "x0" == "$(__nvram_get UPNP_ENABLED)" ] && return
+    __ips -t nat -N MINIUPNPD
+    __ips -t nat -F MINIUPNPD
+	__ips -t nat -A PREROUTING -i $BRIDGE_IFACE -j MINIUPNPD
+    __ips -t filter -N MINIUPNPD
+    __ips -t filter -F MINIUPNPD
+    __ips -t filter -I FORWARD -j MINIUPNPD
+    __create_upnp_conf
+	__log "Starting miniupnpd ..."
+	touch /var/upnp_leases
+	miniupnpd -f $UPNP_CONF -i $BRIDGE_IFACE -a $WIFI_IFACE
+	__check_error $? "Error starting upnp!"
+}
+
+__stream_load_modules(){
+	__log "Loading streaming modules ..."
+	cd /lib/modules
+	for i in usbvideo.ko* uvcvideo.ko.* quickcam_messenger.ko.*; do
+		if [ -e "$i" ]; then
+			__insmod "$i";
+		else 
+			__log "Warning: '$i' not found."
+		fi
+	done
+	cd /
+	__log "Done."
+}
+
+
+__stream_init(){
+	on="$(__nvram_get MJPG_ENABLED)"
+	if [ "x1" == "x$on" ]; then
+		__stream_load_modules
+		__log "Streaming server init ..."
+		if [ ! -e "$DEFAULT_MJPG_DEVICE" ]; then
+			__log "Stream: fatal error: device $DEFAULT_MJPG_DEVICE not found."
+			return;
+		fi
+		mjpgd || __log "Stream server init failed!"
+	else
+		__log "Stream server is disabled."
+	fi
+
+}
+
+__watchdog_init(){
+	__log "Starting WatchDog daemon ..."
+#	watchdog -T 1 -t 3 /dev/watchdog
+#	__check_error $? "Error starting watchdog!"
+}
+
+__create_motd(){
+	__log "Creating $MOTD ..."
+
+	echo -e "\n#################### Welcome! ####################"              					>> $MOTD
+	echo -ne "\n\n"     												>> $MOTD
+	show_net_settings_br__ 												>> $MOTD
+	echo -ne "\n\n"     												>> $MOTD
+	show_net_settings_ra__ 												>> $MOTD
+	echo -ne "\n\n"     												>> $MOTD
+	show_version_info__ 												>> $MOTD
+	echo -ne "\n\n"     												>> $MOTD
+}
+
+banner__(){
+	cat $MOTD
+}
+
+__apcli_state(){
+	iwconfig $CLI_IFACE | awk '/Access Point/{print $5}'
+}
+
+__apcli_write_and_set(){
+	# $1 - key
+	# $2 - value
+	
+	__nvram_set "$1" "$2" &
+	__log "ApCli: set $1 = $2"
+	iwpriv $CLI_IFACE set "$1"="$2"
+	__check_error_not_die $? "Cannot set $1=$2 to $CLI_IFACE!"
+}
+
+__apcli_restart(){
+	iwpriv $CLI_IFACE set ApCliEnable=0
+	ifconfig $CLI_IFACE down
+	____iface_up $CLI_IFACE
+	iwpriv $CLI_IFACE set ApCliEnable=1
+}
+
+__apcli_init(){
+	apcli="$(__nvram_get ApCliEnable)"
+	if [ "x1" == "x$apcli" ]; then
+		__log "ApCli: Configuring $CLI_IFACE ..."
+		ssid="$(__nvram_get ApCliSsid)"
+		if [ "x" == "x$ssid" ]; then
+			__log "ApCli: SSID not found in nvram ..."
+			return
+		fi
+		__log "ApCli: Using SSID $ssid ..."
+		____iface_up $CLI_IFACE
+		for i in 1 2 3 4; do
+			__iwp set SiteSurvey=1
+			iwpriv $WIFI_IFACE get_site_survey | grep -i "$ssid" | head -1 > "/tmp/$CLI_IFACE.net"
+			if [ "x1" != "x$(wc -l /tmp/$CLI_IFACE.net | awk '{print $1}')" ]; then
+				sleep 1
+			else
+				break;
+			fi
+		done
+		if [ "x1" != "x$(wc -l /tmp/$CLI_IFACE.net | awk '{print $1}')" ]; then
+			__log "ApCli: $ssid not found!"
+			return
+		fi
+		enc_type="$(sed -e 's/ //g' /tmp/$CLI_IFACE.net | awk -F '#' '{print $6}')"
+		nvram_enc_type="$(__nvram_get ApCliAuthMode)"
+		case "$enc_type" in
+				NONE)
+				if [ "xOPEN" != "x$nvram_enc_type" ]; then
+					__apcli_write_and_set ApCliAuthMode OPEN
+					__apcli_write_and_set ApCliEncrypType NONE
+					__apcli_restart
+				fi
+				;;
+				
+				*)
+					auth="$(echo $enc_type | awk -F '/' '{print $1}' | awk -F '|' '{print $1}')" # WPA2PSK
+					enc="$(echo $enc_type  | awk -F '/' '{print $2}' | awk -F '|' '{print $1}')" # AES
+					[ "x$nvram_enc_type" == "x$auth" ] || __apcli_write_and_set ApCliAuthMode "$auth"
+					[ "x$(__nvram_get ApCliEncrypType)" == "x$enc" ] || __apcli_write_and_set ApCliEncrypType "$enc"
+					__apcli_restart
+				;;	
+		esac
+		bssid="$(sed -e 's/ //g' /tmp/$CLI_IFACE.net | awk -F '#' '{print $2}')"
+		if [ "x$(__nvram_get ApCliBssid)" != "x$bssid" ]; then
+			__apcli_write_and_set ApCliBssid "$bssid"
+		fi
+		for i in 1 2 3 4; do
+			if [ "xNot-Associated" != "x$(__apcli_state)" ]; then
+				__log "ApCli: Connection with $ssid ($(__apcli_state)) established!"
+				__configure_for_dhcp $CLI_IFACE
+				return
+			else
+				sleep 1;
+			fi
+		done
+		__log "ApCli: Cannot connect to $ssid! :("
+	fi
+}
+
+__acl_init(){
+	__log "Starting ACL ..."
+	
+	p="$(__nvram_get AccessPolicy)"
+	l="$(__nvram_get ACL_LIST)"
+	
+	__iwp set AccessPolicy="$p"
+	case "$p" in
+		1) __log "ACL mode: white list";;
+		2) __log "ACL mode: black list";;
+		0) __log "ACL disabled."; return ;;
+	esac
+	
+	if [ "x" != "x$l" ]; then
+		__iwp set ACLAddEntry="$l"
+	else
+		__log "ACL list is empty."
+	fi
+}
+
+__acl_reinit(){
+	l="$(__nvram_get ACL_LIST)"
+	p="$(__nvram_get AccessPolicy)"
+	
+	__iwp set AccessPolicy="$p"
+	__iwp set ACLClearAll=1
+	
+	if [ "x" != "x$l" ]; then
+		__iwp set ACLAddEntry="$l"
+	fi
+}
+bridged_ap__(){
+	ifconfig ra0 inet 0.0.0.0
+	brctl addif br0 ra0
+
+}
+
+__check_for_wlan_encrypt() {
+AUTH_MODE=$(__nvram_get AuthMode)
+PASSWORD=$(__nvram_get Password)
+ENC_SSID=$(__nvram_get SSID1)
+
+# Opened WiFi Network
+
+if [ "$AUTH_MODE" = "OPEN" ]; then
+    __log "Setting 'OPEN' network!"
+    iwpriv ra0 set AuthMode=OPEN
+    iwpriv ra0 set EncrypType=NONE
+    iwpriv ra0 set IEEE8021X=0
+    iwpriv ra0 set SSID=$ENC_SSID
+fi
+
+#WPA2PSK WiFi Network
+
+if [ "$AUTH_MODE" = "WPAPSK" ]; then
+    __log "Setting 'WPAPSK' network!"
+    iwpriv ra0 set AuthMode=WPAPSK
+    iwpriv ra0 set EncrypType=TKIP
+    iwpriv ra0 set IEEE8021X=0
+    iwpriv ra0 set SSID=$ENC_SSID
+    iwpriv ra0 set WPAPSK=$PASSWORD
+    iwpriv ra0 set DefaultKeyID=2
+    iwpriv ra0 set SSID=$ENC_SSID
+fi
+
+}
+
+################################################################################
+##################################### INIT #####################################
+################################################################################
+
+init__(){
+	export BOOT_NOW=1		# log to kernel
+	__gen_dev_node
+	__log "Main init started.."
+	__led_status_blink
+	__safe_panic          & # done, see init_net_tune();
+	__fs_init               # done
+	__work_dir_init         # done
+	__default_params_init   # done
+	__log_system_init
+	__need_header fire
+
+	    #disabling IPv6
+	    echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6 
+
+	__iface_init            # done
+	__led_wifi_off
+	__create_auth_configs   # done
+	__create_global_configs # done
+#	__stream_init		  &
+	__sshd_init             # done
+	__set_bridge_mode       # done
+	__configure_network     # done
+	__sync_time	      & # done
+	__run_dhcpd             # done
+	__apcli_init
+	__set_nat
+	__tune_network         # done #&
+	__multicast_init        # done
+#	__cron_init             # done
+#	__upnp_init           &
+	__create_motd
+	__watchdog_init
+	__check_for_wlan_encrypt
+#	__post_init
+	__log "Init done."
+}

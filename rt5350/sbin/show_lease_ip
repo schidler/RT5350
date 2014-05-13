@@ -1,0 +1,5 @@
+#!/bin/sh
+
+source /sbin/vars
+
+awk '{printf "%-18s - %-14s -  %s\n", $2, $3, $4}' $DHCPD_LOG

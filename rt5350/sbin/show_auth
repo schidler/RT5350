@@ -1,0 +1,27 @@
+#!/bin/sh
+
+source /sbin/conf
+
+case "$(__nvram_get AUTH_MODE)" in
+    1)
+        mode="nvram";
+        login="$(__nvram_get Login)";
+        pass="$(__nvram_get Password)";
+        ;;
+    *)
+        mode="build-in";
+        login="$SYS_USER";
+        pass="$SYS_PASS";
+        ;;
+esac
+    
+    
+    
+show(){    
+    echo "Current mode:  $mode";
+    echo "Login:         $login";
+    echo "Password:      $pass";
+}
+
+
+show

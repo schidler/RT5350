@@ -1,0 +1,384 @@
+<!DOCTYPE HTML>
+<html>
+ <head>
+  <meta charset="utf-8">
+    <title>Ralink WebIface v.0.2b</title>
+
+<!-- HERE COMES SCRIPT's PART -->
+    
+<script type='text/javascript'>
+
+var opacity=0;
+
+/*
+	Validation of IP address
+
+*/
+
+      function validate( value ) {
+         RegE = /^\d{1,3}.\d{1,3}.\d{1,3}.\d{1,3}$/  
+         if(!value.match(RegE)) 
+		    return false;
+	 else
+		return true;
+      }
+
+/*
+	Sanity parameters check
+
+// '_fld' 	- prefix-ID of field
+// 'frm' 	- form
+// 'beg', 'end'	- id's implementer like _fld_(number) (mjpg_1, mjpg_2, ...). We use that for loop
+// 'redirect'	- redirect signal
+*/
+	function check_all( _fld, frm, beg, cnt, redirect ) {
+		var is_true=true;
+			for(var i=beg; i<=cnt; i++) {
+				if (!validate (document.getElementById(_fld+i).value)) {
+				        alert('Введите корректные параметры!');
+					is_true=false;
+					return false;
+				}
+			}
+
+		if (is_true==true){
+			frm.action = redirect;
+			alert('Новые настройки вступят в силу после перезагрузки!'); 
+		}
+
+	}
+	
+/*
+	Wireless parameters check function
+
+'_fld'-	prefix-ID of wireless inputs
+*/
+
+	function wlan_check( _fld, redirect ){
+		var is_true=true;
+
+		for(var i=1; i<=2; i++) {
+			var txt = document.getElementById(_fld+i).value;
+	        	    if (txt == '') {
+			    alert("Необходимо ввести параметры!");
+				is_true=false;
+                		return false;
+			    }
+			}
+
+			if (is_true==true){
+				wl_form.action = redirect;
+				alert('Новые настройки вступят в силу после перезагрузки!'); 
+			}
+	}
+
+
+/*
+	Is string empty
+
+*/
+
+	function isEmpty( str ) {
+   for (var i = 0; i < str.length; i++)
+      if (" " != str.charAt(i))
+          return false;
+      return true;
+      }
+
+/*
+	Sanity check of video streamer parameters
+
+*/
+
+	function check_streamer( redirect ) {
+		var is_true=true;
+				if (!validate (document.getElementById('mjpg_2').value)) {
+				        alert('Введите корректные параметры!');
+					is_true=false;
+					return false;
+				}
+
+			if ( (isNaN(document.getElementById('mjpg_3').value)) || (isEmpty(document.getElementById('mjpg_3').value))) {
+				alert('Введите корректные параметры!');
+				is_true=false;
+				return false;
+			}
+
+
+		if (is_true==true){
+			mjpg_form.action = redirect;
+			alert('Новые настройки вступят в силу после перезагрузки!'); 
+		}
+
+	}
+
+/*
+
+	Runs command on the router
+
+'frm' 		- form of action
+'redirect'	- redirect signal
+*/
+
+function run_cmd( frm, redirect ) {
+	if(confirm('Вы уверены?')) {
+		frm.action = redirect;
+		return true;
+	}
+	else 
+		return false; 
+}
+
+/*
+	Checks encrypt parameters
+
+*/
+
+function check_encrypt( redirect ) {
+	if(document.getElementById('enc_passwd_id').value.length>0) {
+		alert('Настройки установлены.');
+		enc_form.action = redirect;
+	} else {
+	alert('Вы предпочли не использовать пароль. Пароль будет сброшен.');
+	enc_form.action = redirect;
+	}
+}
+
+/*
+	Hide and show the configurations
+
+*/
+
+function add_info_hide_show() {
+    var div=document.getElementById("add_info_div").style.display;
+ 
+    if(div=="none"){
+        div="block";
+    }
+    else
+        div="none";
+    document.getElementById("add_info_div").style.display=div;
+}
+
+function page_open() {
+
+opacity+= 0.05;
+
+	  document.getElementsByTagName('DIV')[0].style.opacity = opacity;
+		if (opacity < 1)
+			setTimeout(page_open, 20);
+
+} 
+
+</SCRIPT>
+
+<!-- END OF SCRIPT PART -->
+
+<!-- HERE COMES STYLE's PART -->
+
+<style type="text/css">
+
+body {
+    /*background: url(logo.png) repeat-x;*/
+    background: linear-gradient( -45deg, #111, #fff );
+   }
+#intro {
+    padding-left: 250px;
+    font-family: Impact, serif;
+    font-size: 50px;
+}
+
+table, th, tr, td {
+	font-family: verdana,arial,sans-serif;
+	font-size:11px;
+	color:#333333;
+	border-width: 1px;
+	border-color: #a9c6c9
+	border-collapse: collapse;
+}
+
+  </style>
+  
+<!-- END OF STYLE PART -->
+
+ </head>
+ <body onLoad="page_open()">  
+ 
+<!-- INTRO -->
+
+<div>
+<center>
+<font size="7" face="Impact">Alta Ralink RT5350</font> </br>
+<p>Welcome to Ralink RT5350! </br> 
+This service provides easy configuring router settings via web interface.<br>
+</center>
+</p>
+<center><font size="3" face="Impact">Current config (press button to refresh)</font> </br>
+<form action="update_config.html" method="get">
+<input type = "submit" value="Update"></center>
+</form>
+
+</div>
+
+<!-- CURRENTSETTINGS -->
+<br>
+
+<hr>
+
+<!-- TABLE WITH BRIDGE AND WIFI -->
+<center>
+
+<div>
+
+<table border="1" class="altrowstable" id="alternatecolor" cellspacing="10" cellpadding="15">
+
+<!-- BRIDGE SETTINGS -->
+
+<!-- THE FIRST ROW -->
+<td>
+<center>Bridge</center>
+<td>
+<center>Wireless</center>
+<tr>
+<!-- THE NEXT ROW -->
+
+<td VALIGN="top" ALIGN="center"><form id="br_form" action="index.html" method="get">
+
+<pre>
+<table border="0">
+<td>IP:	         <td><input type="text" name="address" id="field_1"/><tr>
+<td>Netmask:	 <td><input type="text" name="netmask" id="field_2"/><tr>
+<td>Gateway:	 <td><input type="text" name="gateway" id="field_3"/><tr>
+<td>Primary DNS:	 <td><input type="text" name="first_dns" id="field_4"/><tr>
+<td>Secondary DNS:	 <td><input type="text" name="secon_dns" id="field_5"/><tr>
+</table>
+</pre>
+
+	<input type="submit" value="Apply" onclick="check_all('field_', br_form, 1, 5, 'set_bridge.html');"/>
+	
+</form>
+
+<!-- WIFI SETTINGS -->
+
+<td VALIGN="top" VALIGN="top" ALIGN="center"> 
+
+<form action="index.html" id="wl_form" method="get"> 
+
+<pre>
+<table border="0">
+<td>SSID:  <td><input type="text" name="ssid" id="wlan_1"/><tr>
+<td>Channel:<td><input type="text" name="channel" id="wlan_2"/><tr>
+</table>
+</pre>
+
+         <input type="submit" value="Apply" onclick="wlan_check('wlan_', 'set_wifi.html');" />
+                  
+</form> 
+<hr>
+<form action="index.html" id="enc_form" method="get">
+<pre>
+<table border="0">
+<td>Encryption		<td><select name="enc_type" form="enc_form">
+  <option>OPEN</option>
+  <option>WPAPSK</option>
+</select><tr>
+<td>Password:       	<td><input type="password" name="enc_passwd" size="12" id="enc_passwd_id" >
+</table>
+</pre> 
+
+    <input type="submit" value="Apply" onclick="check_encrypt('set_encrypt.html')" >
+    
+</form>
+
+<tr>
+
+<!-- DHCP SETTINGS -->
+
+<th colspan="2">Wireless DHCP settings</th>
+
+<tr>
+
+<td colspan="2"  VALIGN="top" ALIGN="center">
+
+<form action="index.html" id="dhcp_form" method="get">
+
+<pre>
+<table border="0">
+<td>DHCP start:							<td><input type="text" name="dhcp_start" id="dhcp_2"><tr>
+<td>DHCP end:							<td><input type="text" name="dhcp_end" id="dhcp_3"><tr>
+<td>DHCP domain:						<td><input type="text" name="dhcp_domain" id="dhcp_domain"><tr>
+<td>DHCP gateway:						<td><input type="text" name="dhcp_gateway" id="dhcp_4"><tr>
+</table>
+</pre>
+
+	<input type="submit" value="Apply" onclick="check_all('dhcp_',dhcp_form,2,4,'set_dhcp.html');"> 
+
+</form>
+
+<tr>
+
+<!-- VIDEO STREAMING SETTINGS -->
+
+<th colspan="2">MJPG streaming</th><tr>
+
+<td colspan="2" VALIGN="top" ALIGN="center">
+
+<form action="index.html" id="mjpg_form" method="get">
+<pre>
+<table border="0">
+<td>Enabled:							<td><input type="checkbox" name="mjpg_enabled" id="mjpg_1"><tr>
+<td>IP address:							<td><input type="text" name="mjpg_ip" id="mjpg_2"><tr>
+<td>Port:							<td><input type="text" name="mjpg_port" id="mjpg_3"><tr>
+<td>Resolution:							<td><select form="mjpg_form" name="mjpg_rsn">
+<option>320x240</option>
+<option>640x480</option>
+</select><tr>
+</pre>
+</table>
+</pre>
+
+    <input type="submit" value="Apply" onclick="check_streamer('set_streamer.html');">
+
+</form>
+
+<tr>
+
+<th colspan="2">Other</th> <tr>
+<td>
+
+	<form action="index.html" id="reboot_form" method="get">
+<pre>
+	    Reboot router
+</pre>
+		<center> <input type="submit" value="Reboot" onclick="run_cmd(reboot_form, 'reboot.html');"> </center>
+	</form>
+
+<td>
+
+	<form action="index.html" id="dhcp_on_form" method="get">
+<pre>
+
+DHCP mode:	 <input type="checkbox" name="dhcp_on" id="dhcp_check_on"/>
+
+</pre>
+		<center> <input type="submit" value="Apply" onclick="run_cmd(dhcp_on_form, 'dhcp_switch.html');"> </center>
+	</form>
+<tr>
+
+</table>
+
+<!-- END OF <TABLE> -->
+
+<br>
+
+<hr>
+
+</center> <!-- TABLE CENTER -->
+
+</div>
+
+<center> <font size="1" face="Impact">Stanislav Podolsky (c), 2013</font> </center>
+
+  </body>
+</html>
+

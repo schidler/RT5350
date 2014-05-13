@@ -1,0 +1,5 @@
+#!/bin/sh
+
+source /sbin/conf
+
+show_net_settings_ra__

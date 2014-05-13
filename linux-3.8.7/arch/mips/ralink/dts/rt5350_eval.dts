@@ -1,0 +1,80 @@
+/dts-v1/;
+
+/include/ "rt5350.dtsi"
+
+/ {
+	#address-cells = <1>;
+	#size-cells = <1>;
+	compatible = "tWRT-121", "ralink,rt5350-eval-board", "ralink,rt5350-soc";
+	model = "tWRT-121";
+
+	memory@0 {
+		reg = <0x0 0x2000000>;
+	};
+
+	palmbus@10000000 {
+		sysc@0 {
+			ralink,pinmux = "i2c", "spi", "uartlite", "jtag", "mdio", "sdram", "rgmii";
+			ralink,uartmux = "gpio";
+			ralink,wdtmux = <1>;
+		};
+
+		gpio0: gpio@600 {
+			status = "okay";
+		};
+	};
+
+	cfi@1f000000 {
+		compatible = "cfi-flash";
+		reg = <0x1f000000 0x800000>;
+
+		bank-width = <2>;
+		device-width = <2>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		partition@0 {
+			label = "uboot";
+			reg = <0x0 0x30000>;
+			read-only;
+		};
+		partition@30000 {
+			label = "uboot-env";
+			reg = <0x30000 0x10000>;
+			read-only;
+		};
+		partition@40000 {
+			label = "calibration";
+			reg = <0x40000 0x10000>;
+			read-only;
+		};
+		partition@50000 {
+			label = "linux";
+			reg = <0x50000 0x7b0000>;
+		};
+	};
+	ethernet@10100000 {
+		status = "okay";
+	};
+
+	esw@10110000 {
+		status = "okay";
+		ralink,portmap = <0x2f>;
+	};
+
+	gpio-leds {
+		compatible = "gpio-leds";
+		wlan {
+			label = "twrt:green:wlan";
+			gpios = <&gpio0 8 0>;
+		};
+		mobile {
+			label = "twrt:green:mobile";
+			gpios = <&gpio0 9 1>;
+		};
+	};
+
+	wmac@10180000 {
+		status = "okay";
+	};
+};

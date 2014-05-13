@@ -1,0 +1,9 @@
+#!/bin/sh
+
+#find ../rt5350/lib/modules/ -type f -exec rm -v {} \;
+#for i in $(find -name '*.ko'); do
+#    name=$(basename $i)
+#    echo "Copy $i -> ../romfs/lib/modules/$name ..."
+#    cp -f $i ../rt5350/lib/modules/
+#    /home/gambit/SimSim/RT288x_SDK/toolchain/lzma-4.32.0beta5/src/lzma/lzma -zv9 ../rt5350/lib/modules/$name
+#done

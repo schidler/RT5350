@@ -1,0 +1,4 @@
+cd /tmp
+wget http://178.150.0.63:201/rt5350.bin
+mtd_write write rt5350.bin Kernel
+reboot

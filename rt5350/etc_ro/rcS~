@@ -1,0 +1,18 @@
+#!/bin/sh
+
+# Load all functions
+source /sbin/conf
+
+# Call init
+init__
+
+# Show banner
+banner__
+
+# Register wireless event handler
+
+# Run tWRT discovery daemon
+telnetd&
+mdev -s
+setup_connection.sh
+buttond&

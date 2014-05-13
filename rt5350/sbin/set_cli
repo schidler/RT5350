@@ -1,0 +1,27 @@
+#!/bin/sh
+
+
+# Version 0.0.1
+# userx [at] lavabit [dot] com
+
+source /sbin/vars
+source /sbin/conf
+
+usage(){
+    cat << EOF >&2
+Usage:
+    $0 enable <1 or 0>
+    $0 ssid <ssid>
+    $0 pass <password>
+EOF
+    exit 1;
+}
+
+[ "x$1" == "x" -o "x$2" == "x" ] && usage
+
+case "$1" in
+    enable) [ "x0" == "x$2" -o "x1" == "x$2" ] || usage; __nvram_set ApCliEnable "$2";;
+    ssid)   __nvram_set ApCliSsid "$2";;
+    pass)   __nvram_set ApCliWPAPSK "$2";;
+    *) usage;;
+esac

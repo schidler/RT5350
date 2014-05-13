@@ -1,0 +1,34 @@
+SSID: bsnDot11EssSsid: 1.3.6.1.4.1.14179.2.1.1.1.2: s
+BSSID: bsnAPIfDot11BSSID: 1.3.6.1.4.1.14179.2.2.3.1.30: s (mac addr?) 
+Channel: bsnAPIfInterferenceChannelNo: 1.3.6.1.4.1.14179.2.2.14.1.1: i
+Signal: bsnMobileStationSnr: 1.3.6.1.4.1.14179.2.1.6.1.26: i
+Mode: bsnDot11EssRadioPolicy: 1.3.6.1.4.1.14179.2.1.1.1.30: i
+Security: bsnTrustedApEncryptionUsed: 1.3.6.1.4.1.14179.2.6.2.50: i
+
+
+
+
+OID 	1.3.6.1.4.1.14179.2.1.1.1.30
+Type 	INTEGER
+Permission 	read-create
+Status 	current
+Values 	0 : all
+1 : dot11bOnly
+2 : dot11aOnly
+3 : dot11gOnly
+4 : dot11bgOnly
+5 : dot11agOnly
+6 : dot11abOnly
+
+OID 	1.3.6.1.4.1.14179.2.6.2.50
+Type 	INTEGER
+Permission 	accessible-for-notify
+Status 	current
+Values 	0 : none
+1 : open
+2 : wep
+3 : wpa
+
+SSID: les, BSSID: 2e:36:63:6c:bf:30, Channel: 10, Signal 29, Mode: 11b/g, Security: WEP
+SSID: Triolan Internet, BSSID: f8:d1:11:90:f4:78, Channel: 11, Signal 100, Mode: 11b/g/n, Security: NONE
+SSID: monitori-9696d0_AP, BSSID: 00:15:af:09:8e:53, Channel: 11, Signal 20, Mode: 11b/g, Security: NONE

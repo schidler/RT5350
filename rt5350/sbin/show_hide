@@ -1,0 +1,12 @@
+#!/bin/sh
+
+source /sbin/conf
+
+st="$(__nvram_get HIDE_MODE)"
+
+echo -ne "Led hide mode: "
+
+case "$st" in
+    0) echo "off" ;;
+    *) echo "on" ;;
+esac

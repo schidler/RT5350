@@ -1,0 +1,84 @@
+#!/bin/bash
+
+PATH+=:/opt/RT288x_SDK/toolchain-3.0.x/bin/
+
+die(){
+	echo "$@";
+	exit 1;
+}
+
+echo -e "\n###################################### START CONFIGURE! ######################################\n"
+
+echo "Copying required files.."
+
+
+#Configuring sbin/version file
+
+rm ../rt5350/sbin/version -vf
+
+FIRM_VERSION=`cat config_ver`
+
+FIRM_EP="export FIRM_EP=1366202545"
+FIRM_DATE="export FIRM_DATE=\""$(date)"\""
+FIRM_BUILD_ID="export FIRM_BUILD_ID=\"$FIRM_VERSION\""
+
+echo $[$FIRM_VERSION+1] > config_ver
+
+echo $FIRM_EP 			>> ../rt5350/sbin/version
+echo $FIRM_DATE 		>> ../rt5350/sbin/version
+echo $FIRM_BUILD_ID  		>> ../rt5350/sbin/version
+
+echo -e "Configure done!"
+
+echo -e "\n###################################### START BUILDING! ######################################\n"
+
+echo "Building uBoot image ..."
+make || die "Error compiling kernel!"
+./comp
+make || die "Error compiling kernel!"
+
+mipsel-linux-uclibc-objcopy -O binary  -R .note -R .comment vmlinux zImage || die "Error!"
+./lzma -9 -f -S .lzma zImage || die "Error while compressing!"
+./mkimage \
+		-A mips                                       \
+		-O linux                                       \
+		-T kernel                                       \
+		-C lzma                                          \
+		-a 80000000                                       \
+		-e 8027e000                                  	   \
+		-n "Firmware for Ralink RT5350"                     \
+		-d zImage.lzma         				     \
+        rt5350.bin
+ls -lh rt5350.bin
+
+echo -e "\n###################################### REBUILDING! ######################################\n"
+
+#Copying Apko (rt2860v2_ap.ko)
+
+./lzma -9 -f -S .lzma ./drivers/net/wireless/ralink/rt5350/rt2860v2_ap/rt2860v2_ap.ko
+cp ./drivers/net/wireless/ralink/rt5350/rt2860v2_ap/rt2860v2_ap.ko.lzma ../rt5350/lib/modules/ -vf
+
+#
+
+echo "Building uBoot image ..."
+make || die "Error compiling kernel!"
+./comp
+make || die "Error compiling kernel!"
+
+mipsel-linux-uclibc-objcopy -O binary  -R .note -R .comment vmlinux zImage || die "Error!"
+./lzma -9 -f -S .lzma zImage || die "Error while compressing!"
+./mkimage \
+		-A mips                                       \
+		-O linux                                       \
+		-T kernel                                       \
+		-C lzma                                          \
+		-a 80000000                                       \
+		-e 8027e000                                  	   \
+		-n "Firmware for Ralink RT5350"                     \
+		-d zImage.lzma         				     \
+        rt5350.bin
+ls -lh rt5350.bin
+
+cp rt5350.bin /tftpboot/ -vf
+
+echo -e "\n###################################### BUILD DONE! ######################################\n"

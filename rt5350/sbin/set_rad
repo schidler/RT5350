@@ -1,0 +1,24 @@
+#!/bin/sh
+
+source /sbin/conf
+
+usage(){
+    cat << EOF
+Usage:
+        $0 mode <1 or 0>
+        $0 server <new_server_addr>
+        $0 secret <new_secret>
+        
+Where <new_server_addr> is a ip addr like '80.73.15.84', or domain like 'triolan.com'
+EOF
+    exit 1;
+}
+
+[ $# -eq 2 -o "x" == "x$2" ] || usage
+
+case "$1" in
+    server) __set_rad_server "$2";;
+    secret) __set_rad_secret "$2";;
+    mode) [ "x1" == "x$2" -o "x0" == "x$2" ] || usage; __nvram_set STRICT_WIFI "$2";;
+    *) usage;;
+esac

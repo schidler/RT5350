@@ -1,0 +1,21 @@
+#!/bin/sh
+
+source /sbin/conf
+
+usage(){
+    cat << EOF
+Usage: $0 on | off
+Example:
+    Turn on hide mode: $0 on
+    Turn off hide mode: $0 off
+EOF
+    exit 1;
+}
+
+if [ "x" == "x$1" ]; then usage; fi;
+
+case "$1" in
+    on|ON|oN|On) __hide_on ;;
+    off|OFF|Off|oFF) __hide_off ;;
+    *) usage ;;
+esac

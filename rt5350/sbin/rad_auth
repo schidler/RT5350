@@ -1,0 +1,48 @@
+#!/bin/sh
+
+### $1 - mac
+
+source /sbin/conf
+
+log(){
+    echo "$(date +'[%x %X]') authd-rad: $@" >&2
+}
+
+die(){
+    log "error: $@"
+    exit 1;
+}
+
+[ "x" == "x$1" ] && die "need more params";
+
+client_mac="$(echo $1 | sed -e 's/\:/-/g' | awk '{print toupper($1)}')"
+
+our_mac="$(__get_mac_addr $BRIDGE_IFACE | sed -e 's/\:/-/g' | awk '{print toupper($1)}')"
+
+rad_server="$(__get_rad_server)"
+rad_secret="$(__get_rad_secret)"
+
+#verdict="$(echo User-Name=$client_mac,Calling-Station-Id=$client_mac,Called-Station-Id=$our_mac | radclient -d /etc_ro $rad_server auth $rad_secret 2>/dev/null | awk '/Received/{sub(/,/, "", $6); print $6}')"
+
+rad="$(echo User-Name=$client_mac,Calling-Station-Id=$client_mac,Called-Station-Id=$our_mac | radclient -d /etc_ro $rad_server auth $rad_secret)";
+#__log_krn "RAD: radcli answer: $rad";
+
+verdict="$(echo $rad 2>/dev/null | awk '/Received/{sub(/,/, "", $6); print $6}')"
+number="$(echo $rad 2>/dev/null | awk '/Reply-Message/{sub(/,/, "", $6); print $18}')"
+
+log "RAD: verdict $verdict";
+log "RAD: number $number";
+
+number="$(echo $number | sed -e 's/^["]*//;s/["]*$//')";
+
+#adding to user in driver
+#log "RAD: command iwpriv ra0 set ClientPersonalAccount=$1:$number;"
+#iwpriv ra0 set ClientPersonalAccount=$1:$number;
+
+case "$verdict" in
+    2) log "access granted for $client_mac"; 
+	log "RAD: command iwpriv ra0 set ClientPersonalAccount=$1:$number;"
+	iwpriv ra0 set ClientPersonalAccount=$1:$number;
+	exit 0;; 
+    *) die "access denied for $client_mac";;
+esac

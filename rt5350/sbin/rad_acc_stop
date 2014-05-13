@@ -1,0 +1,41 @@
+#!/bin/sh
+
+### $1 - mac
+
+source /sbin/conf
+
+log(){
+    echo "$(date +'[%x %X]') authd-rad: $@" >> /dev/kmsg
+    echo "$(date +'[%x %X]') authd-rad: $@" >&2
+}
+
+die(){
+    log "error: $@"
+    exit 1;
+}
+
+[ "x" == "x$1" ] && die "need more params";
+
+client_mac="$(echo $1 | sed -e 's/\:/-/g' | awk '{print toupper($1)}')"
+
+our_mac="$(__get_mac_addr $BRIDGE_IFACE | sed -e 's/\:/-/g' | awk '{print toupper($1)}')"
+
+our_ip="$(____get_ip_addr $BRIDGE_IFACE)"
+
+rad_server="$(__get_rad_server)"
+rad_secret="$(__get_rad_secret)"
+
+#echo "User-Name=$client_mac,Calling-Station-Id=$client_mac,Called-Station-Id=$our_mac,Acct-Status-Type=Stop,Event-Timestamp=$(date +'%s'),NAS-IP-Address=$our_ip,NAS-Identifier=$our_ip,Acct-Input-Octets=$2,Acct-Output-Octets=0,Acct-Input-Gigawords=0,Acct-Output-Gigawords=0,Acct-Input-Packets=$3,Acct-Output-Packets=0" | \
+#    radclient -d /etc_ro $rad_server acct $rad_secret 2>/dev/null | \
+#            awk '/Received/{sub(/,/, "", $6); print $6}'
+
+echo "User-Name=$client_mac,Calling-Station-Id=$client_mac,Called-Station-Id=$our_mac,Acct-Status-Type=Stop,NAS-IP-Address=$our_ip,NAS-Identifier=$our_ip,Acct-Input-Octets=$2,Acct-Output-Octets=0,Acct-Input-Packets=$3,Acct-Output-Packets=0" | \
+    radclient -d /etc_ro $rad_server acct $rad_secret 2>/dev/null | \
+            awk '/Received/{sub(/,/, "", $6); print $6}'
+
+
+
+case "$?" in
+    0) log "accouting stop done for $client_mac"; exit 0;; 
+    *) die "failed to stop accouting for $client_mac";;
+esac

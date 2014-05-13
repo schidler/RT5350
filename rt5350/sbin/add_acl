@@ -1,0 +1,25 @@
+#!/bin/sh
+
+# add MAC to blacklist
+
+source /sbin/conf
+
+die(){
+    echo "Error: $@"
+    exit 1
+}
+
+[ "x" == "x$1" ] && die "Need MAC addr!"
+
+LIST="$(__nvram_get ACL_LIST)"
+
+if __test_mac_addr "$1"; then
+    if echo "$LIST" | grep "$1" 2>&1 >/dev/null; then
+        die "$1 already in blacklist!"
+    fi
+    LIST="$LIST;$1"
+    __nvram_set ACL_LIST "$LIST"
+    __acl_reinit
+else
+    die "Wrong MAC addr: $1"
+fi

@@ -1,0 +1,30 @@
+#!/bin/sh
+
+source /sbin/conf
+
+usage(){
+    cat << EOF >&2
+Usage:
+    $0 mode <1 or 0>
+    $0 login <login>
+    $0 pass <pass>
+    
+Example:
+    $0 mode 1
+    $0 login admin
+    $0 pass admin
+EOF
+    exit 1;
+}
+
+if [ $# -ne 2 -o "x$2" == "x" ]; then
+    usage;
+fi
+
+
+case "$1" in
+    mode) [ "x0" == "x$2" -o "x1" == "x$2" ] || usage; __nvram_set AUTH_MODE "$2";;
+    login)   __nvram_set Login "$2";;
+    pass)    __nvram_set Password "$2";;   
+    *) usage;;
+esac

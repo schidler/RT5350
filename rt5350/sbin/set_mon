@@ -1,0 +1,28 @@
+#!/bin/sh
+
+source /sbin/conf
+
+usage(){
+    cat << EOF
+Usage:
+        $0 snmp <new_server_addr>
+        $0 update <new_server_addr>
+        $0 syslog_enable <1 or 0>
+        $0 syslog <new_server_addr>
+        
+Where <new_server_addr> is a ip addr like '80.73.15.84', or domain like 'triolan.com'
+EOF
+    exit 1;
+}
+
+[ $# -eq 2 -o "x" == "x$2" ] || usage
+
+case $1 in
+    snmp)           __nvram_set SNMP_SERVER "$2";;
+    update)         __nvram_set UPDATE_SERVER "$2";;
+    syslog_enable) [ "x1" == "x$2" -o "x0" == "x$2" ] || usage; __nvram_set REMOTE_SYSLOG "$2";;
+    syslog)         __nvram_set REMOTE_SYSLOG_SERVER "$2";;
+    *) usage;;
+esac
+
+

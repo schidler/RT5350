@@ -1,0 +1,13 @@
+cd /tmp
+
+if [ -f rt5350.bin ]; then
+  echo "File already exists! Deleting.."
+  rm rt5350.bin
+fi
+
+echo "Downloading firmware.."
+wget http://192.168.1.122:201/rt5350.bin
+echo "Flashing!"
+mtd_write write rt5350.bin Kernel 2> /dev/null
+echo "Flashing completed!"
+reboot

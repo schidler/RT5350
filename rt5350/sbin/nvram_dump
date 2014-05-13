@@ -1,0 +1,3 @@
+#!/bin/sh
+
+ralink_init rt2860_nvram_show

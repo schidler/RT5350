@@ -1,0 +1,11 @@
+--- init/main.c	2013-03-03 16:55:11.479832747 +1100
++++ init/main.c	2013-03-03 16:59:37.292509631 +1100
+@@ -815,6 +814,8 @@
+ 
+ 	flush_delayed_fput();
+ 
++	print_scheduler_version();
++
+ 	if (ramdisk_execute_command) {
+ 		if (!run_init_process(ramdisk_execute_command))
+ 			return 0;

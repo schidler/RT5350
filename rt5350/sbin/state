@@ -1,0 +1,58 @@
+#!/bin/sh
+
+### state tool
+### Version 0.0.1
+### userx [at] lavabit [dot] com (c)
+
+### Example:
+### ~ # state
+### System:
+###  Uptime:     19.99
+###  Total mem:  13572
+###  Free mem:   2104
+###  CPU load:   0.0%
+### 
+### Firmware:
+###  Date:       1347367147
+###  
+### Network:
+###  Clients:    0
+###  Peek:       0
+###  Conn count: 5
+### 
+
+source /sbin/version
+source /sbin/vars
+
+
+cat << EOF
+System:
+ Uptime:     $(awk '{print $1}'           /proc/uptime)
+ Total mem:  $(awk '/MemTotal/{print $2}' /proc/meminfo)
+ Free mem:   $(awk '/MemFree/ {print $2}' /proc/meminfo)
+ CPU load:   $(top -n 1 | awk '/CPU\:/{print $2}')
+
+Firmware:
+ Date:       $FIRM_EP
+ 
+Network:
+ Clients:    $(iwpriv $WIFI_IFACE get_mac_table 2>/dev/null | awk '!/ra|MAC|^$/{print $1}' | wc -l)
+ Peek:       $(wc -l $DHCPD_LOG | awk '{print $1}')
+ Conn count: $(sed -n '$=' /proc/net/nf_conntrack)
+ 
+EOF
+
+#awk '{print $1 " " $2 " " $3}' /proc/loadav
+
+# ucdavis.ucdTraps.ucdStart -> 1.3.6.1.4.1.2021.251.1
+#memTotalFree i 2000        -> 1.3.6.1.4.1.2021.4.11
+#hrMemorySize i 13000       -> 1.3.6.1.2.1.25.2.2
+#laLoad s '1.3 4.2 1.4'     -> 1.3.6.1.4.1.2021.10.1.3
+#versionDate s 234342       -> 1.3.6.1.4.1.2021.100.3
+#tcpActiveOpens c 5         -> 1.3.6.1.2.1.6.5
+#hrProcessorLoad i 1        -> 1.3.6.1.2.1.25.3.3.1.2
+#hrDevice s 'mac'           -> 1.3.6.1.2.1.25.3
+#hrSystemNumUsers u 1       -> 1.3.6.1.2.1.25.1.5
+
+
+

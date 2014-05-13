@@ -1,0 +1,5 @@
+#!/bin/sh
+
+cp 3883-base rt3883-full
+cat root_uImage_rt3883.bin >> rt3883-full
+ls -lh rt3883-full
